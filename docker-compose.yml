@@ -1,0 +1,161 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  HoneyBot-IoT  —  full stack (60% milestone)
+#  COMSATS University Islamabad  |  SP23-BCT-001 / SP23-BCT-003
+#
+#  Networks
+#    honeynet : internet-facing honeypots. Outbound NEW connections from this
+#               subnet are DROPPED by deploy/firewall.sh so a "compromised"
+#               container can never reach the internet (scope: inbound-only).
+#    backnet  : internal only (internal: true) — DB, Redis, API, intel engine.
+#  The API is NOT published to the host; only Nginx (basic-auth) is exposed.
+# ═══════════════════════════════════════════════════════════════════════════
+
+networks:
+  honeynet:
+    name: honeybot_honeynet
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.66.0/24
+  backnet:
+    driver: bridge
+    internal: true
+
+volumes:
+  pgdata:
+  honey_data:    # per-honeypot writable data (host keys, TLS cert)
+  captures:      # uploaded files / malware samples (non-executable)
+  pcap:          # packet captures (100% milestone)
+
+x-honeypot: &honeypot
+  build: { context: ., dockerfile: Dockerfile.honeypot }
+  image: honeybot/honeypot:0.6
+  restart: unless-stopped
+  env_file: .env
+  networks: [honeynet, backnet]
+  depends_on:
+    db: { condition: service_healthy }
+    redis: { condition: service_started }
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  read_only: true
+  tmpfs: ["/tmp"]
+  volumes: ["honey_data:/app/data"]
+  deploy:
+    resources:
+      limits: { cpus: "0.75", memory: 256M }
+
+services:
+  # ── data stores (internal only) ───────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: honeybot_db
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks: [backnet]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: honeybot_redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb",
+              "--maxmemory-policy", "allkeys-lru"]
+    networks: [backnet]
+
+  # ── device state manager (shared emulated-device state) ───────────────────
+  device_state:
+    <<: *honeypot
+    container_name: honeybot_state
+    command: ["python", "device_state/device_state.py"]
+    networks: [backnet]            # no attacker traffic, internal only
+
+  # ── honeypots (5 protocols, 3 devices) ────────────────────────────────────
+  ssh_honeypot:
+    <<: *honeypot
+    container_name: honeybot_ssh
+    command: ["python", "ssh_honeypot/ssh_honeypot.py"]
+    ports: ["2222:2222"]
+
+  telnet_honeypot:
+    <<: *honeypot
+    container_name: honeybot_telnet
+    command: ["python", "telnet_honeypot/telnet_honeypot.py"]
+    ports: ["2323:2323"]
+
+  http_honeypot:
+    <<: *honeypot
+    container_name: honeybot_http
+    command: ["python", "http_honeypot/http_honeypot.py"]
+    ports: ["8080:8080", "8443:8443", "8081:8081", "8082:8082"]
+
+  mqtt_honeypot:
+    <<: *honeypot
+    container_name: honeybot_mqtt
+    command: ["python", "mqtt_honeypot/mqtt_honeypot.py"]
+    ports: ["1883:1883"]
+
+  rtsp_honeypot:
+    <<: *honeypot
+    container_name: honeybot_rtsp
+    command: ["python", "rtsp_honeypot/rtsp_honeypot.py"]
+    ports: ["554:8554"]           # published on the standard RTSP port
+
+  # ── API + threat-intelligence engine (internal only) ──────────────────────
+  api:
+    build: { context: ., dockerfile: Dockerfile.api }
+    image: honeybot/api:0.6
+    container_name: honeybot_api
+    restart: unless-stopped
+    env_file: .env
+    command: ["python", "-m", "uvicorn", "api.api:app", "--host", "0.0.0.0", "--port", "5000"]
+    networks: [backnet]
+    volumes: ["./geoip:/app/geoip:ro"]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+
+  intel:
+    build: { context: ., dockerfile: Dockerfile.api }
+    image: honeybot/api:0.6
+    container_name: honeybot_intel
+    restart: unless-stopped
+    env_file: .env
+    command: ["python", "intel/engine.py"]
+    networks: [backnet]
+    volumes: ["./geoip:/app/geoip:ro"]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+
+  # ── Nginx: the ONLY public entry to the dashboard (basic auth) ────────────
+  nginx:
+    image: nginx:1.26-alpine
+    container_name: honeybot_nginx
+    restart: unless-stopped
+    ports: ["80:80"]
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
+      - ./dashboard/dist:/usr/share/nginx/html:ro
+    networks: [backnet]
+    depends_on: [api]
+
+  # ── attack simulator (lab testing only; `--profile sim`) ──────────────────
+  attacker:
+    build: { context: ., dockerfile: Dockerfile.attacker }
+    image: honeybot/attacker:0.6
+    profiles: ["sim"]
+    networks: [honeynet]
+    command: ["--host", "ssh_honeypot", "--http-host", "http_honeypot",
+              "--mqtt-host", "mqtt_honeypot", "--telnet-host", "telnet_honeypot",
+              "--rtsp-host", "rtsp_honeypot"]

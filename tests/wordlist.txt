@@ -1,0 +1,10 @@
+root:root
+root:123456
+admin:admin
+admin:1234
+admin:password
+user:user
+support:support
+guest:guest
+admin:admin123
+operator:operator

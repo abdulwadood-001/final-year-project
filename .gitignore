@@ -1,0 +1,10 @@
+.env
+nginx/.htpasswd
+geoip/*.mmdb
+captures/
+pcap/
+__pycache__/
+*.pyc
+*.log
+data/
+.pytest_cache/

@@ -1,0 +1,44 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: honeybot
+          POSTGRES_USER: honeybot
+          POSTGRES_PASSWORD: honeybot
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U honeybot" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7.2-alpine
+        ports: ["6379:6379"]
+    env:
+      DATABASE_URL: postgresql://honeybot:honeybot@localhost:5432/honeybot
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Load database schema
+        run: psql "$DATABASE_URL" -f init.sql
+      - name: Run tests
+        run: pytest -q
+      - name: Security lint (bandit)
+        run: bandit -r . -x ./tests -lll     # fail only on high-severity
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images
+        run: |
+          cp .env.example .env
+          docker compose build

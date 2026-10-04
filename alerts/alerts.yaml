@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────────────────────────────────
+#  HoneyBot-IoT — alert thresholds & deduplication   (scope Module 6)
+#  Secrets (bot token, SMTP password) come from .env, never from this file.
+# ─────────────────────────────────────────────────────────────────────────
+
+# Lowest severity that triggers a notification:  LOW | MEDIUM | HIGH | CRITICAL
+min_severity: HIGH
+
+# Time-window grouping: after an alert for an IP, further detections for the
+# SAME IP inside this window are recorded as "suppressed" instead of sent.
+# A detection with a HIGHER severity than the last one sent is escalated
+# (sent once) even inside the window.
+dedupe_window_minutes: 10
+
+# Per attack-type overrides (enabled / min_severity)
+types:
+  BRUTE_FORCE:              { enabled: true,  min_severity: HIGH }      # >= 20 fails / 10 min
+  CREDENTIAL_COMPROMISE:    { enabled: true,  min_severity: HIGH }
+  CREDENTIAL_STUFFING:      { enabled: true,  min_severity: HIGH }
+  RECONNAISSANCE:           { enabled: false }                          # too noisy on the internet
+  WEB_SCAN:                 { enabled: true,  min_severity: HIGH }
+  RTSP_ROUTE_ENUM:          { enabled: false }
+  MALWARE_DELIVERY:         { enabled: true,  min_severity: HIGH }
+  MIRAI_SIGNATURE:          { enabled: true,  min_severity: HIGH }
+  BOTNET_C2:                { enabled: true,  min_severity: HIGH }
+  ICS_UNAUTHORIZED_COMMAND: { enabled: true,  min_severity: HIGH }
+  ICS_PROCESS_MONITORING:   { enabled: false }
+  PROTOCOL_EXPLOIT:         { enabled: true,  min_severity: HIGH }
+  POST_EXPLOITATION:        { enabled: true,  min_severity: MEDIUM }
+  MULTI_PROTOCOL_ATTACK:    { enabled: true,  min_severity: CRITICAL }
+  VIDEO_STREAM_ACCESS:      { enabled: true,  min_severity: MEDIUM }
+  DENIAL_OF_VIEW:           { enabled: true,  min_severity: HIGH }
+
+channels:
+  telegram: { enabled: true }   # needs TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env
+  email:    { enabled: true }   # needs SMTP_HOST, SMTP_USER, SMTP_PASSWORD, ALERT_EMAIL_TO in .env

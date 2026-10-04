@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>HoneyBot-IoT — Threat Intelligence Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+:root{
+  --bg:#070b12;--surface:#0d1421;--surface2:#111a2b;--border:#1a2640;--accent:#00d4ff;
+  --danger:#ff3b5c;--warn:#ff8c00;--ok:#00e676;--low:#4fc3f7;--text:#c8d8f0;--muted:#4a5d7a;
+  --ssh:#7c4dff;--http:#00d4ff;--telnet:#ff8c00;--mqtt:#00e676;--rtsp:#ff4da6;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Rajdhani',sans-serif;font-size:15px;min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,212,255,.012) 2px,rgba(0,212,255,.012) 4px);pointer-events:none;z-index:1000}
+.header{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:500}
+.header-brand{display:flex;align-items:center;gap:12px}
+.logo-hex{width:36px;height:36px;background:linear-gradient(135deg,var(--accent),#0080ff);clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);display:flex;align-items:center;justify-content:center;font-size:16px}
+.brand-text h1{font-size:18px;font-weight:700;letter-spacing:3px;color:var(--accent);text-shadow:0 0 20px rgba(0,212,255,.4)}
+.brand-text p{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px}
+.header-right{display:flex;align-items:center;gap:18px}
+.live-badge{display:flex;align-items:center;gap:6px;font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--ok);letter-spacing:1px}
+.pulse{width:7px;height:7px;background:var(--ok);border-radius:50%;animation:pulse 1.4s ease-in-out infinite}
+.pulse.off{background:var(--danger);animation:none}
+@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(0,230,118,.4)}50%{opacity:.7;box-shadow:0 0 0 6px rgba(0,230,118,0)}}
+.header-time{font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--muted)}
+.search-box{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 12px;border-radius:3px;font-family:'Share Tech Mono',monospace;font-size:12px;width:200px}
+.search-box:focus{outline:none;border-color:var(--accent)}
+.main{padding:18px 24px;display:flex;flex-direction:column;gap:18px}
+.row{display:grid;gap:14px}
+.r-devices{grid-template-columns:repeat(3,1fr)}
+.r-stats{grid-template-columns:repeat(4,1fr) 1.3fr 1.3fr}
+.r-2{grid-template-columns:1fr 1fr}
+.r-map{grid-template-columns:1.6fr 1fr}
+.r-feed{grid-template-columns:1.3fr 1fr}
+.r-bot{grid-template-columns:1fr 1fr 1fr}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.panel-header{padding:11px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.panel-title{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--accent)}
+.panel-count{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--muted)}
+.btn{background:transparent;border:1px solid var(--border);color:var(--accent);padding:4px 11px;border-radius:3px;cursor:pointer;font-family:'Rajdhani';font-size:12px;letter-spacing:1px}
+.btn:hover{background:rgba(0,212,255,.08);border-color:var(--accent)}
+/* device cards */
+.dev-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:16px 18px;position:relative;overflow:hidden}
+.dev-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--c)}
+.dev-card.cctv{--c:var(--rtsp)}.dev-card.smartlock{--c:var(--ssh)}.dev-card.sensor{--c:var(--telnet)}
+.dev-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.dev-name{font-size:15px;font-weight:700;letter-spacing:1px;display:flex;align-items:center;gap:8px}
+.dev-badges{display:flex;gap:4px}
+.pbadge{font-family:'Share Tech Mono',monospace;font-size:9px;padding:2px 5px;border-radius:2px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)}
+.dev-state{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-family:'Share Tech Mono',monospace;font-size:11px}
+.dev-state div{display:flex;justify-content:space-between;border-bottom:1px dotted rgba(26,38,64,.6);padding:3px 0}
+.dev-state span{color:var(--muted)}.dev-state b{color:var(--text);font-weight:400}
+.dev-state b.hot{color:var(--danger)}.dev-state b.unlocked{color:var(--warn)}.dev-state b.on,.dev-state b.locked{color:var(--ok)}
+.dev-foot{display:flex;justify-content:space-between;margin-top:11px;font-size:11px;color:var(--muted)}
+.dev-foot .live{color:var(--danger);font-weight:700}
+/* stat cards */
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:16px 18px;position:relative;overflow:hidden}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--pc,var(--accent))}
+.stat-card.ssh{--pc:var(--ssh)}.stat-card.telnet{--pc:var(--telnet)}.stat-card.http{--pc:var(--http)}
+.stat-card.mqtt{--pc:var(--mqtt)}.stat-card.rtsp{--pc:var(--rtsp)}.stat-card.total{--pc:var(--accent)}.stat-card.danger{--pc:var(--danger)}
+.stat-label{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:9px}
+.stat-value{font-size:32px;font-weight:700;line-height:1;font-family:'Share Tech Mono',monospace}
+.stat-card.ssh .stat-value{color:var(--ssh)}.stat-card.telnet .stat-value{color:var(--telnet)}.stat-card.http .stat-value{color:var(--http)}
+.stat-card.mqtt .stat-value{color:var(--mqtt)}.stat-card.rtsp .stat-value{color:var(--rtsp)}.stat-card.total .stat-value{color:var(--accent)}.stat-card.danger .stat-value{color:var(--danger)}
+.stat-sub{font-size:11px;color:var(--muted);margin-top:5px}
+.stat-icon{position:absolute;right:13px;top:14px;font-size:20px;opacity:.22}
+#map{height:360px;width:100%;background:#05080e}
+.leaflet-container{background:#05080e;font-family:'Share Tech Mono',monospace}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+.leaflet-popup-content{font-family:'Share Tech Mono',monospace;font-size:11px}
+.chart-wrap{padding:14px 16px}canvas{max-height:300px}
+.feed{height:360px;overflow-y:auto}
+.feed-item{display:grid;grid-template-columns:72px 110px 52px 70px 1fr 74px;gap:8px;align-items:center;padding:7px 16px;border-bottom:1px solid rgba(26,38,64,.5);font-family:'Share Tech Mono',monospace;font-size:11px;animation:fi .3s ease}
+@keyframes fi{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+.feed-item:hover{background:rgba(0,212,255,.03)}
+.feed-time{color:var(--muted)}.feed-ip{color:var(--text);cursor:pointer}.feed-ip:hover{color:var(--accent)}
+.feed-proto{font-weight:700;font-size:10px}
+.proto-SSH{color:var(--ssh)}.proto-HTTP{color:var(--http)}.proto-Telnet{color:var(--telnet)}.proto-MQTT{color:var(--mqtt)}.proto-RTSP{color:var(--rtsp)}
+.feed-dev{color:var(--muted);font-size:10px}.feed-detail{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.feed-et{text-align:right;font-size:9px;letter-spacing:1px}
+.et-auth-ok{color:var(--danger)}.et-auth{color:var(--muted)}.et-command{color:var(--warn)}.et-download_attempt{color:var(--danger)}
+.et-state_change{color:var(--rtsp)}.et-http_request{color:var(--http)}.et-mqtt_publish{color:var(--mqtt)}.et-rtsp_request{color:var(--rtsp)}
+.det-list,.ioc-list,.mitre-list{max-height:360px;overflow-y:auto}
+.det-item{display:flex;gap:11px;padding:11px 16px;border-bottom:1px solid rgba(26,38,64,.5);animation:fi .3s ease}
+.sev-badge{font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 7px;border-radius:2px;white-space:nowrap;height:fit-content;margin-top:2px}
+.sev-CRITICAL{background:rgba(255,59,92,.15);color:var(--danger);border:1px solid rgba(255,59,92,.3)}
+.sev-HIGH{background:rgba(255,140,0,.12);color:var(--warn);border:1px solid rgba(255,140,0,.3)}
+.sev-MEDIUM{background:rgba(255,214,0,.1);color:#ffd400;border:1px solid rgba(255,214,0,.25)}
+.sev-LOW{background:rgba(79,195,247,.1);color:var(--low);border:1px solid rgba(79,195,247,.25)}
+.det-body{flex:1;min-width:0}
+.det-type{font-size:12px;font-weight:700;color:var(--text);margin-bottom:2px}
+.det-ip{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--accent)}
+.det-detail{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mitre-tags{margin-top:4px;display:flex;flex-wrap:wrap;gap:3px}
+.mitre-tag{font-family:'Share Tech Mono',monospace;font-size:9px;padding:1px 5px;border-radius:2px;background:rgba(124,77,255,.12);border:1px solid rgba(124,77,255,.3);color:#b39dff}
+table{width:100%;border-collapse:collapse}
+thead th{padding:9px 14px;text-align:left;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border)}
+tbody tr{border-bottom:1px solid rgba(26,38,64,.5)}tbody tr:hover{background:rgba(0,212,255,.03)}
+tbody td{padding:8px 14px;font-family:'Share Tech Mono',monospace;font-size:11px}
+.flag{font-family:'Share Tech Mono',monospace;color:var(--muted)}
+.tl-CRITICAL{color:var(--danger)}.tl-HIGH{color:var(--warn)}.tl-MEDIUM{color:#ffd400}.tl-LOW{color:var(--low)}
+.empty{padding:36px;text-align:center;color:var(--muted);font-size:12px;letter-spacing:1px}
+.feed::-webkit-scrollbar,.det-list::-webkit-scrollbar,.ioc-list::-webkit-scrollbar,.mitre-list::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.modal{position:fixed;inset:0;background:rgba(3,6,12,.82);z-index:2000;display:none;align-items:flex-start;justify-content:center;padding:5vh 20px;overflow-y:auto}
+.modal.show{display:flex}
+.modal-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;width:860px;max-width:100%}
+.modal-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.modal-body{padding:16px 20px;max-height:72vh;overflow-y:auto;font-family:'Share Tech Mono',monospace;font-size:12px}
+.ev-line{padding:6px 0;border-bottom:1px dotted rgba(26,38,64,.6);white-space:pre-wrap;word-break:break-word}
+.ev-t{color:var(--muted)}.ev-k{color:var(--accent)}
+@media(max-width:1100px){.r-stats,.r-devices,.r-bot,.r-2,.r-map,.r-feed{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="header-brand"><div class="logo-hex">🍯</div>
+    <div class="brand-text"><h1>HONEYBOT-IoT</h1>
+      <p>HIGH-INTERACTION MULTI-PROTOCOL IoT HONEYPOT // COMSATS UNIVERSITY ISLAMABAD</p></div></div>
+  <div class="header-right">
+    <input class="search-box" id="search" placeholder="search ip / cmd / cred…" />
+    <div class="live-badge"><div class="pulse" id="live-dot"></div><span id="live-text">LIVE</span></div>
+    <div class="header-time" id="clock">--:--:--</div>
+    <button class="btn" onclick="loadAll()">⟳ REFRESH</button>
+  </div>
+</header>
+
+<div class="main">
+  <div class="row r-devices" id="dev-row"></div>
+
+  <div class="row r-stats">
+    <div class="stat-card ssh"><div class="stat-icon">🔐</div><div class="stat-label">SSH · Smart Lock</div><div class="stat-value" id="s-ssh">—</div><div class="stat-sub">:2222</div></div>
+    <div class="stat-card telnet"><div class="stat-icon">⚙️</div><div class="stat-label">Telnet · Sensor</div><div class="stat-value" id="s-telnet">—</div><div class="stat-sub">:2323</div></div>
+    <div class="stat-card http"><div class="stat-icon">🌐</div><div class="stat-label">HTTP · All</div><div class="stat-value" id="s-http">—</div><div class="stat-sub">:8080 / :8081 / :8082</div></div>
+    <div class="stat-card mqtt"><div class="stat-icon">📡</div><div class="stat-label">MQTT · Broker</div><div class="stat-value" id="s-mqtt">—</div><div class="stat-sub">:1883</div></div>
+    <div class="stat-card rtsp"><div class="stat-icon">📷</div><div class="stat-label">RTSP · CCTV</div><div class="stat-value" id="s-rtsp">—</div><div class="stat-sub">:554</div></div>
+    <div class="stat-card danger"><div class="stat-icon">🚨</div><div class="stat-label">Detections</div><div class="stat-value" id="s-det">—</div><div class="stat-sub">Critical <span id="s-crit">—</span> · IPs <span id="s-ips">—</span></div></div>
+  </div>
+
+  <div class="row r-map">
+    <div class="panel"><div class="panel-header"><span class="panel-title">🗺 Attack Origins</span><span class="panel-count" id="map-count">— sources</span></div><div id="map"></div></div>
+    <div class="panel"><div class="panel-header"><span class="panel-title">Attack Timeline — 24 h</span></div><div class="chart-wrap"><canvas id="lineChart"></canvas></div></div>
+  </div>
+
+  <div class="row r-2">
+    <div class="panel"><div class="panel-header"><span class="panel-title">Protocol Distribution</span></div><div class="chart-wrap"><canvas id="donutChart"></canvas></div></div>
+    <div class="panel"><div class="panel-header"><span class="panel-title">⚔ MITRE ATT&CK Techniques</span><span class="panel-count" id="mitre-count"></span></div><div class="mitre-list" id="mitre-body"><div class="empty">—</div></div></div>
+  </div>
+
+  <div class="row r-feed">
+    <div class="panel"><div class="panel-header"><span class="panel-title">⚡ Live Event Feed</span><span class="panel-count" id="feed-count">—</span></div><div class="feed" id="feed-body"><div class="empty">Waiting for attacks…</div></div></div>
+    <div class="panel"><div class="panel-header"><span class="panel-title">🚨 Threat Detections</span><button class="btn" onclick="triggerDetect()" id="det-btn">RUN DETECTOR</button></div><div class="det-list" id="det-body"><div class="empty">No detections yet.</div></div></div>
+  </div>
+
+  <div class="row r-bot">
+    <div class="panel"><div class="panel-header"><span class="panel-title">Top Attackers</span></div><div class="table-wrap"><table><thead><tr><th>IP</th><th>Geo</th><th>Events</th><th>Threat</th></tr></thead><tbody id="attackers-table"><tr><td colspan="4" class="empty">—</td></tr></tbody></table></div></div>
+    <div class="panel"><div class="panel-header"><span class="panel-title">Top Credentials</span></div><div class="table-wrap"><table><thead><tr><th>User</th><th>Password</th><th>Proto</th><th>#</th></tr></thead><tbody id="creds-table"><tr><td colspan="4" class="empty">—</td></tr></tbody></table></div></div>
+    <div class="panel"><div class="panel-header"><span class="panel-title">Indicators of Compromise</span><span class="panel-count" id="ioc-count"></span></div><div class="ioc-list" id="ioc-body"><div class="empty">No IOCs yet.</div></div></div>
+  </div>
+</div>
+
+<div class="modal" id="modal" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modal-card"><div class="modal-head"><span class="panel-title" id="modal-title">Session</span><button class="btn" onclick="document.getElementById('modal').classList.remove('show')">CLOSE ✕</button></div><div class="modal-body" id="modal-body"></div></div>
+</div>
+
+<script>
+const API='/api';
+const PROTOS=['ssh','telnet','http','mqtt','rtsp'];
+const COLORS={ssh:'#7c4dff',telnet:'#ff8c00',http:'#00d4ff',mqtt:'#00e676',rtsp:'#ff4da6'};
+const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const flag=cc=>cc?cc.toUpperCase().replace(/./g,c=>String.fromCodePoint(127397+c.charCodeAt())):'';
+async function j(p){try{const r=await fetch(API+p);return r.ok?await r.json():null}catch{return null}}
+
+let donut,line,map,markers;
+function initCharts(){
+  donut=new Chart(document.getElementById('donutChart'),{type:'doughnut',
+    data:{labels:['SSH','Telnet','HTTP','MQTT','RTSP'],datasets:[{data:[0,0,0,0,0],
+      backgroundColor:[COLORS.ssh,COLORS.telnet,COLORS.http,COLORS.mqtt,COLORS.rtsp],borderColor:'#0d1421',borderWidth:3}]},
+    options:{cutout:'62%',plugins:{legend:{labels:{color:'#4a5d7a',font:{family:'Share Tech Mono',size:11},padding:12}}}}});
+  line=new Chart(document.getElementById('lineChart'),{type:'line',
+    data:{labels:[],datasets:PROTOS.map(p=>({label:p.toUpperCase(),data:[],borderColor:COLORS[p],
+      backgroundColor:COLORS[p]+'18',tension:.4,fill:true,pointRadius:1.5,borderWidth:1.5}))},
+    options:{plugins:{legend:{labels:{color:'#4a5d7a',font:{family:'Share Tech Mono',size:10},boxWidth:10}}},
+      scales:{x:{ticks:{color:'#4a5d7a',font:{family:'Share Tech Mono',size:9},maxTicksLimit:8},grid:{color:'rgba(26,38,64,.5)'}},
+              y:{ticks:{color:'#4a5d7a',font:{family:'Share Tech Mono',size:9}},grid:{color:'rgba(26,38,64,.5)'},beginAtZero:true}}}});
+}
+function initMap(){
+  map=L.map('map',{worldCopyJump:true,attributionControl:false,zoomControl:true}).setView([25,20],1.4);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:10,subdomains:'abcd'}).addTo(map);
+  markers=L.layerGroup().addTo(map);
+}
+const sevColor={CRITICAL:'#ff3b5c',HIGH:'#ff8c00',MEDIUM:'#ffd400',LOW:'#4fc3f7'};
+async function loadMap(){
+  const rows=await j('/map');if(!rows)return;
+  document.getElementById('map-count').textContent=rows.length+' sources';
+  markers.clearLayers();
+  rows.forEach(r=>{
+    const c=sevColor[r.threat_level]||'#4fc3f7',rad=Math.min(5+Math.log2(r.events+1)*2,16);
+    L.circleMarker([r.lat,r.lon],{radius:rad,color:c,fillColor:c,fillOpacity:.5,weight:1}).addTo(markers)
+     .bindPopup(`<b>${esc(r.ip)}</b><br>${esc(r.city||'')} ${esc(r.country||'')}<br>events: ${r.events}<br>threat: ${esc(r.threat_level)}<br>proto: ${esc((r.protocols||[]).join(','))}${r.geo_source==='demo'?'<br><i>demo geo</i>':''}`);
+  });
+}
+async function loadStats(){
+  const d=await j('/stats');if(!d)return;
+  for(const p of PROTOS)document.getElementById('s-'+p).textContent=d.sessions[p.toUpperCase()]??0;
+  document.getElementById('s-det').textContent=d.detections;
+  document.getElementById('s-crit').textContent=d.critical;
+  document.getElementById('s-ips').textContent=d.unique_ips;
+  donut.data.datasets[0].data=PROTOS.map(p=>d.sessions[p.toUpperCase()]||0);donut.update();
+}
+async function loadTimeline(){
+  const rows=await j('/timeline');if(!rows)return;
+  line.data.labels=rows.map(r=>r.hour.slice(11,16));
+  PROTOS.forEach((p,i)=>line.data.datasets[i].data=rows.map(r=>r[p]||0));line.update();
+}
+async function loadDevices(){
+  const d=await j('/devices');if(!d)return;const row=document.getElementById('dev-row');
+  const order=['cctv','smartlock','sensor'];
+  row.innerHTML=order.map(k=>{
+    const dev=d.devices[k],s=dev.state,on=dev.online;
+    let rows='';
+    if(k==='cctv')rows=[['status',s.status],['recording',s.recording],['motion',s.motion],['viewers',s.viewers],['firmware',s.firmware],['resolution',s.resolution]];
+    if(k==='smartlock')rows=[['lock',s.lock_state],['door',s.door],['battery',s.battery+'%'],['auto-lock',s.auto_lock],['last by',s.last_actor||'-'],['firmware',s.firmware]];
+    if(k==='sensor')rows=[['temp',s.temperature+'°C'],['pressure',s.pressure],['humidity',s.humidity+'%'],['alarm',s.alarm],['interval',s.interval+'s'],['plc',s.plc_link]];
+    const cls=v=>{v=String(v);if(v==='unlocked'||v==='open')return'unlocked';if(['locked','on','online','up','closed'].includes(v))return'on';if(v.match(/HIGH|TEMP|PRESSURE/))return'hot';return'';};
+    return `<div class="dev-card ${k}"><div class="dev-top"><div class="dev-name"><span class="pulse ${on?'':'off'}"></span>${esc(dev.name)}</div>
+      <div class="dev-badges">${dev.protocols.map(p=>`<span class="pbadge">${p}</span>`).join('')}</div></div>
+      <div class="dev-state">${rows.map(([k2,v])=>`<div><span>${k2}</span><b class="${cls(v)}">${esc(v)}</b></div>`).join('')}</div>
+      <div class="dev-foot"><span>24h events: ${dev.events_24h}</span>${dev.active_sessions?`<span class="live">● ${dev.active_sessions} active</span>`:'<span>idle</span>'}</div></div>`;
+  }).join('');
+  const anyUp=Object.values(d.services).some(s=>s.up);
+  document.getElementById('live-dot').className='pulse'+(anyUp?'':' off');
+  document.getElementById('live-text').textContent=anyUp?'LIVE':'OFFLINE';
+}
+async function loadFeed(){
+  const a=await j('/attacks/recent?limit=60'),b=document.getElementById('feed-body');
+  if(!a||!a.length){b.innerHTML='<div class="empty">No events yet.</div>';return;}
+  document.getElementById('feed-count').textContent=a.length+' events';
+  b.innerHTML=a.map(e=>{
+    const ts=(e.ts||'').slice(11,19),et=e.event_type+(e.success?'-ok':'');
+    let d=e.command||e.payload||(e.username!=null?`${e.username}:${e.password??''}`:'');
+    const label={auth:e.success?'LOGIN ✓':'auth',command:'cmd',http_request:'http',mqtt_publish:'pub',mqtt_subscribe:'sub',rtsp_request:'rtsp',download_attempt:'DOWNLOAD',state_change:'STATE'}[e.event_type]||e.event_type;
+    return `<div class="feed-item"><span class="feed-time">${ts}</span>
+      <span class="feed-ip" onclick="showIP('${esc(e.ip)}')">${flag(e.country_code)} ${esc(e.ip)}</span>
+      <span class="feed-proto proto-${e.protocol}">${e.protocol}</span><span class="feed-dev">${esc(e.device)}</span>
+      <span class="feed-detail">${esc(d)}</span><span class="feed-et et-${et}">${esc(label)}</span></div>`;}).join('');
+}
+async function loadDetections(){
+  const d=await j('/detections?limit=40'),b=document.getElementById('det-body');
+  if(!d||!d.length){b.innerHTML='<div class="empty">No detections. Click RUN DETECTOR.</div>';return;}
+  b.innerHTML=d.map(x=>`<div class="det-item"><span class="sev-badge sev-${x.severity}">${x.severity}</span>
+    <div class="det-body"><div class="det-type">${esc(x.attack_type.replace(/_/g,' '))} ${x.alerted?'🔔':''}</div>
+      <div class="det-ip">${flag(x.country_code)} ${esc(x.ip)} <span style="color:var(--muted)">${esc(x.device||'')} ${esc(x.protocol||'')}</span></div>
+      <div class="det-detail">${esc(x.details)}</div>
+      <div class="mitre-tags">${(x.mitre||[]).map((t,i)=>`<span class="mitre-tag" title="${esc((x.mitre_names||[])[i]||'')}">${esc(t)}</span>`).join('')}</div>
+    </div></div>`).join('');
+}
+async function loadMitre(){
+  const d=await j('/mitre/summary'),b=document.getElementById('mitre-body');
+  if(!d||!d.length){b.innerHTML='<div class="empty">—</div>';return;}
+  document.getElementById('mitre-count').textContent=d.length+' techniques';
+  const max=Math.max(...d.map(x=>x.detections));
+  b.innerHTML=d.map(x=>`<div style="padding:9px 16px;border-bottom:1px solid rgba(26,38,64,.5)">
+    <div style="display:flex;justify-content:space-between;font-family:'Share Tech Mono';font-size:11px">
+      <span><span class="mitre-tag">${esc(x.technique)}</span> ${esc(x.name)}</span><span style="color:var(--accent)">${x.detections}</span></div>
+    <div style="background:var(--border);height:3px;border-radius:2px;margin-top:5px"><div style="height:3px;border-radius:2px;background:linear-gradient(90deg,#7c4dff,#00d4ff);width:${Math.round(x.detections/max*100)}%"></div></div></div>`).join('');
+}
+async function loadAttackers(){
+  const r=await j('/attackers/top?limit=12'),b=document.getElementById('attackers-table');
+  if(!r||!r.length){b.innerHTML='<tr><td colspan="4" class="empty">—</td></tr>';return;}
+  b.innerHTML=r.map(x=>`<tr><td class="feed-ip" onclick="showIP('${esc(x.ip)}')">${esc(x.ip)}</td>
+    <td class="flag">${flag(x.country_code)} ${esc(x.city||x.country||'—')}</td>
+    <td style="color:var(--accent)">${x.attempts}</td><td class="tl-${x.threat_level}">${esc(x.threat_level)} ${x.threat_score}</td></tr>`).join('');
+}
+async function loadCreds(){
+  const r=await j('/credentials/top'),b=document.getElementById('creds-table');
+  if(!r||!r.length){b.innerHTML='<tr><td colspan="4" class="empty">—</td></tr>';return;}
+  b.innerHTML=r.map(x=>`<tr><td>${esc(x.username)}</td><td style="color:${x.worked?'var(--danger)':'var(--warn)'}">${esc(x.password)}</td>
+    <td style="color:var(--muted)">${esc(x.protocols)}</td><td style="color:var(--muted)">${x.count}</td></tr>`).join('');
+}
+async function loadIocs(){
+  const r=await j('/iocs?limit=40'),b=document.getElementById('ioc-body');
+  if(!r||!r.length){b.innerHTML='<div class="empty">No IOCs yet.</div>';return;}
+  document.getElementById('ioc-count').textContent=r.length;
+  b.innerHTML=r.map(x=>`<div style="padding:8px 16px;border-bottom:1px solid rgba(26,38,64,.5);font-family:'Share Tech Mono';font-size:11px">
+    <span class="mitre-tag">${esc(x.type)}</span> <span style="color:var(--text)">${esc(x.value)}</span>
+    <span style="color:var(--muted);float:right">×${x.hits}</span></div>`).join('');
+}
+async function showIP(ip){
+  const sess=await j('/sessions/list?limit=50&ip='+encodeURIComponent(ip));
+  const m=document.getElementById('modal'),body=document.getElementById('modal-body');
+  document.getElementById('modal-title').textContent='Attacker '+ip;
+  if(!sess||!sess.length){body.innerHTML='<div class="empty">No sessions.</div>';m.classList.add('show');return;}
+  let html='';
+  for(const s of sess.slice(0,8)){
+    const det=await j('/sessions/'+s.session_id);
+    html+=`<div class="ev-line"><span class="ev-k">▶ ${esc(s.protocol)} / ${esc(s.device)}</span> <span class="ev-t">${esc((s.started_at||'').slice(0,19))} · ${s.commands} cmds · ${s.auth_attempts} auth${s.login_success?' · LOGIN ✓':''}</span></div>`;
+    (det.events||[]).forEach(e=>{
+      let line=e.event_type==='command'?'$ '+esc(e.command):e.event_type==='auth'?`auth ${esc(e.username)}:${esc(e.password)} ${e.success?'✓':'✗'}`:
+        e.event_type==='http_request'?esc(e.command):e.event_type.startsWith('mqtt')?esc(e.event_type)+' '+esc((e.raw&&e.raw.topic)||'')+' '+esc(e.payload||''):
+        e.event_type==='download_attempt'?'⬇ '+esc(e.payload):esc(e.event_type)+' '+esc(e.command||e.payload||'');
+      const mt=(e.mitre||[]).map(x=>`<span class="mitre-tag">${esc(x.id)}</span>`).join(' ');
+      html+=`<div class="ev-line"><span class="ev-t">${esc((e.ts||'').slice(11,19))}</span> ${line} ${mt}</div>`;
+    });
+  }
+  body.innerHTML=html;m.classList.add('show');
+}
+let st;document.getElementById('search').addEventListener('input',function(){
+  clearTimeout(st);const q=this.value.trim();if(q.length<2)return;
+  st=setTimeout(async()=>{
+    const r=await j('/search?q='+encodeURIComponent(q)+'&limit=80');
+    const b=document.getElementById('feed-body');document.getElementById('feed-count').textContent=(r?r.length:0)+' matches';
+    if(!r||!r.length){b.innerHTML='<div class="empty">No matches for “'+esc(q)+'”.</div>';return;}
+    b.innerHTML=r.map(e=>`<div class="feed-item"><span class="feed-time">${(e.ts||'').slice(11,19)}</span>
+      <span class="feed-ip" onclick="showIP('${esc(e.ip)}')">${esc(e.ip)}</span><span class="feed-proto proto-${e.protocol}">${e.protocol}</span>
+      <span class="feed-dev">${esc(e.device)}</span><span class="feed-detail">${esc(e.command||e.payload||'')}</span><span class="feed-et">${esc(e.event_type)}</span></div>`).join('');
+  },300);
+});
+async function triggerDetect(){const b=document.getElementById('det-btn');b.textContent='RUNNING…';b.disabled=true;
+  await fetch(API+'/detect',{method:'POST'});await Promise.all([loadDetections(),loadMitre(),loadStats(),loadMap(),loadAttackers(),loadIocs()]);
+  b.textContent='RUN DETECTOR';b.disabled=false;}
+function clock(){document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-GB')}
+async function loadAll(){await Promise.all([loadStats(),loadDevices(),loadTimeline(),loadMap(),loadFeed(),loadDetections(),loadMitre(),loadAttackers(),loadCreds(),loadIocs()]);}
+initCharts();initMap();clock();setInterval(clock,1000);loadAll();setInterval(loadAll,5000);
+</script>
+</body>
+</html>
