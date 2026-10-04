@@ -8,3 +8,4 @@ __pycache__/
 *.log
 data/
 .pytest_cache/
+dump.rdb
