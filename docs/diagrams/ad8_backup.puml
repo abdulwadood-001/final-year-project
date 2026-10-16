@@ -1,0 +1,47 @@
+@startuml
+!include _style.iuml
+start
+:docker compose run ~--rm backup COMMAND
+(or the always-on backup service in loop mode);
+switch (Command?)
+case (loop / once)
+  :Wait 60 s after start-up (loop only);
+  repeat
+    :stamp = UTC date-time;
+    :pg_dump -Fc to a .part file, then rename;
+    if (Sample volume present?) then (yes)
+      :tar.gz the quarantined samples;
+    else (no)
+      :Write an empty archive;
+    endif
+    :Write SHA-256 manifest for both files;
+    :Delete sets older than the newest BACKUP_KEEP;
+    if (Any step failed?) then (yes)
+      :Log 'backup FAILED';
+    else (no)
+    endif
+    :Sleep BACKUP_INTERVAL_HOURS (loop only);
+  repeat while (Mode = loop?) is (yes) not (no)
+case (verify [stamp])
+  :Pick stamp (default: newest);
+  :sha256sum -c manifest;
+  :Report integrity OK or mismatch;
+case (restore stamp)
+  :Verify checksums first;
+  if (Checksums match?) then (no)
+    :Abort restore;
+    stop
+  else (yes)
+  endif
+  :pg_restore ~--clean ~--if-exists;
+  if (Sample volume writable?) then (yes)
+    :Extract samples archive;
+  else (no)
+    :Skip samples and log a notice;
+  endif
+  :Log restore complete;
+case (list)
+  :Print available stamps;
+endswitch
+stop
+@enduml

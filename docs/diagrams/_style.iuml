@@ -1,0 +1,15 @@
+skinparam dpi 200
+skinparam defaultFontName "DejaVu Serif"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #222222
+skinparam ActivityBorderColor #444444
+skinparam ActivityBackgroundColor #F1F1F1
+skinparam ActivityDiamondBackgroundColor #F1F1F1
+skinparam ActivityDiamondBorderColor #444444
+skinparam SwimlaneBorderColor #222222
+skinparam SwimlaneBorderThickness 1.5
+skinparam SwimlaneTitleFontSize 13
+skinparam NoteBackgroundColor #FFF8DC
+skinparam NoteBorderColor #999999
+skinparam PartitionBorderColor #555555

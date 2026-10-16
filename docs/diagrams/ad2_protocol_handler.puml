@@ -1,0 +1,69 @@
+@startuml
+!include _style.iuml
+start
+:Attacker opens TCP connection to a honeypot port;
+:Create Session(protocol, device, ip, port)
+and log 'connect' event;
+switch (Which protocol?)
+case (SSH :2222)
+  :Send Dropbear banner;
+  :Paramiko key exchange
+  (host key of the smart lock);
+case (Telnet :2323)
+  :IAC negotiation
+  (WILL ECHO, SGA, carry buffer);
+  :BusyBox login prompt
+  for the industrial sensor;
+case (HTTP :8080-8082 / HTTPS :8443)
+  :Route request: camera panel,
+  lock REST API or sensor HMI;
+  :Check cookie, bearer token
+  or Basic auth;
+case (MQTT :1883)
+  :Read fixed header and
+  variable-length remaining length;
+  :CONNECT with optional
+  user and password;
+case (RTSP :554)
+  :Parse OPTIONS / DESCRIBE / SETUP;
+  :Challenge with Digest + Basic;
+endswitch
+repeat
+  :Receive credentials and check them against the
+  device's weak-credential profile (common/creds.py);
+  :Log 'auth' event (username, password, success);
+  if (Credential accepted?) then (no)
+    :Apply progressive delay for repeat failures;
+    :Reply with the device's own error;
+  else (yes)
+  endif
+repeat while (Rejected and attempts left?) is (yes) not (no)
+if (Logged in?) then (no)
+  :Close connection;
+else (yes)
+  :Hand over to the device interface (SSH shell, exec
+  or scp channel, Telnet BusyBox shell, web UI, REST,
+  broker topics, RTSP SDP);
+  repeat
+    :Receive command / request / packet;
+    if (Well-formed?) then (yes)
+      :Execute against emulated device
+      and Device State Manager;
+      :Log command, http_request, mqtt_publish,
+      mqtt_subscribe or rtsp_request event;
+    else (no)
+      :Log 'malformed' event
+      (feeds PROTOCOL_EXPLOIT);
+    endif
+    if (Download command or file payload?) then (yes)
+      :Record URL as download_attempt (never fetched)
+      or quarantine file (see malware capture);
+    else (no)
+    endif
+  repeat while (Connection open and not idle-timed-out?) is (yes) not (no)
+endif
+:session.close(): ended_at, auth_attempts,
+login_success, commands;
+:Log 'disconnect' event;
+stop
+@enduml

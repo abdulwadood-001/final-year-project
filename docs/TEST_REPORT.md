@@ -1,41 +1,67 @@
-# HoneyBot-IoT — Test Report (60% milestone)
+# HoneyBot-IoT — Test Report (70% milestone, v0.7)
 
-Environment: PostgreSQL 16, Redis 7.2, Python 3.12/3.13. Traffic generated with
-`tests/simulate_attacks.py` against the local stack.
+All results below were produced on the v0.7 code. The Docker results come from a full
+`docker compose up --build` deployment (Docker 29, iptables firewall backend) with the
+bundled simulator as the traffic source.
 
-## 1. Unit tests (`pytest`)
+## 1. Automated tests
 
-```
-pytest -q
-31 passed, 12 skipped
-```
-
-- `test_parsers.py` (31 tests): MQTT variable-length-integer round-trips (incl. > 127-byte
-  packets — the v0.3 bug), MQTT CONNECT credential parsing, topic wildcard matching, RTSP
-  Digest-auth accept/reject, fake-shell argument tolerance, Mirai preamble, URL capture without
-  fetch, command chaining/pipes, device-control state change, MITRE mapping, per-device creds.
-- `test_api.py` (12): API endpoint smoke tests. Skipped in the dev sandbox because the
-  installed `httpx`/`starlette` versions mismatch; they run under the pinned versions in
-  `requirements-dev.txt` and in the Docker image.
-
-## 2. Integration — protocol → unified event store
-
-After one full simulator run, all five protocols write through `log_event()`:
-
-| Protocol | Distinct event types | Events |
+| Suite | Command | Result |
 |---|---|---|
-| SSH | 7 | 237 |
-| RTSP | 6 | 179 |
-| HTTP | 4 | 135 |
-| MQTT | 7 | 50 |
-| Telnet | 5 | 35 |
+| Backend, with PostgreSQL 16 + Redis 7 | `pytest -q` | **78 passed** |
+| Backend, no database / no Redis | `pytest -q` | **45 passed, 33 skipped** in 0.3 s (DB tests skip cleanly) |
+| Dashboard unit tests | `cd dashboard && npm test` | **17 passed** (routing incl. the detail-route fix, session replay, helpers) |
+| Dashboard type-check (strict TS) | `npm run typecheck` | 0 errors |
+| Dashboard lint | `npm run lint` | 0 problems |
+| Shell scripts | `bash -n` / `sh -n` | OK |
 
-(Event types include `connect`, `auth`, `command`, `http_request`, `mqtt_publish/subscribe`,
-`rtsp_request`, `download_attempt`, `exec_attempt`, `state_change`, `malformed`.)
+Backend coverage by file:
+- `tests/test_parsers.py` (31): MQTT variable-length integers and parsing, RTSP Digest,
+  fake-shell behaviour, MITRE mapping, credentials.
+- `tests/test_api.py` (12): API smoke tests.
+- `tests/test_v07.py` (35):
+  - NUL sanitising; scheme-less downloads (wget, curl, busybox wget, tftp)
+  - ELF architecture sniffing; shell-drop capture into a read-only quarantine; YARA family identification
+  - sensor-config whitelist; sensor history; Telnet IAC split across TCP reads; PDF rendering; weak-label priority
+  - DB-backed: NUL rows stored, capture indexed and YARA-scanned, MALWARE_FAMILY detection, idempotent IOC hits,
+    **STIX bundle validated by the OASIS `stix2` library**, ML dataset labels, every new endpoint,
+    attacker/session detail, PDF/STIX/metrics/CSV exports, `api_token` never exposed,
+    **WebSocket relays live events**, report severity ranking.
 
-## 3. Detection coverage — all 6 ML classes exercised
+## 2. Deployment test (`docker compose up --build`)
 
-A single `POST /api/detect` pass over simulated traffic produced detections in every category:
+| Check | Result |
+|---|---|
+| 13 long-running services + `auth-init` | all **Up**; `db`, `api`, `firewall` healthy; `auth-init` exited 0 |
+| Honeypots wait for the firewall | honeypots start only after the `firewall` healthcheck passes |
+| Schema auto-migration | API and intel log `schema up to date`; also verified against an existing v0.6 DB and a SQL_ASCII DB |
+| Dashboard on :80 (E4) | `401` without or with a wrong password, `200` with the configured one; SPA deep links (`/attackers/<ip>`) return 200 |
+| API not published | host port 5000 closed; API reachable only through Nginx |
+| Generated password (E6) | `docker compose logs auth-init` prints a random 20-character password when `DASHBOARD_PASSWORD` is empty; stored as bcrypt |
+| Security headers | CSP `default-src 'self'`, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy` |
+| Service heartbeats | 7/7 services online |
+
+## 3. Network isolation (E5), real iptables
+
+From inside `honeybot_ssh` (honeynet):
+
+| Destination | Result |
+|---|---|
+| `1.1.1.1:80` (internet) | blocked (timeout) |
+| `8.8.8.8:53` (external DNS) | blocked |
+| `192.168.1.1:22` (LAN) | blocked |
+| `db:5432` (internal) | reachable |
+
+The `DOCKER-USER` DROP counter went from 0 to 9 and `HONEYBOT-OUTBOUND-DROP` lines appear in
+the kernel log. The intel container, which is not on the honeynet and needs egress for
+Telegram/SMTP, did **not** increase the counter. Script checks: `apply` is idempotent
+(re-applying leaves exactly 5 rules), `check` detects a deleted rule, `ensure` repairs it,
+and `flush` removes only HoneyBot rules.
+
+## 4. End-to-end detection (simulator inside the honeynet)
+
+`docker compose --profile sim run --rm attacker` (10 scenarios) followed by one intel pass
+produced detections in all 15 rule classes:
 
 ```
 BOTNET_C2 · BRUTE_FORCE · CREDENTIAL_COMPROMISE · CREDENTIAL_STUFFING · DENIAL_OF_VIEW
@@ -44,56 +70,36 @@ POST_EXPLOITATION · PROTOCOL_EXPLOIT · RECONNAISSANCE · RTSP_ROUTE_ENUM
 VIDEO_STREAM_ACCESS · WEB_SCAN
 ```
 
-Each detection carries MITRE ATT&CK technique IDs (Enterprise + ICS), visible on the dashboard.
+The 16th class, `MALWARE_FAMILY` (YARA on a captured sample), is covered by
+`test_detections_include_malware_family`. Cross-protocol state stayed consistent: the sensor
+threshold changed over Telnet was reflected in Redis, on the device page, over MQTT and in
+the change log.
 
-## 4. Cross-protocol state consistency (high-interaction proof)
+## 5. Dashboard in a real browser (headless Chromium through Nginx with basic auth)
 
-- Unlock the Smart Lock via the **HTTP REST API** → `device:smartlock lock_state = unlocked`
-  in Redis → the same value is returned over **MQTT** (`lock/status`) and over **SSH**
-  (`cat /etc/lock_state`).
-- Change a sensor threshold over **Telnet** (`sensorctl set temp_threshold 20`) → reflected in
-  the **HTTP** sensor HMI and the **MQTT** `sensor/config` topic.
+Every page was opened against the live stack:
 
-## 5. Alert deduplication (one message per campaign)
+| Page | Result |
+|---|---|
+| Overview, Attackers, attacker detail, Detections, Devices, CCTV / Smart lock / Sensor detail, Sessions, session replay, Malware, IOCs & MITRE, Reports & Alerts, Search, 404 | rendered with live data; **0 console errors, 0 failed API calls** |
+| WebSocket | sidebar shows **live** (connected through Nginx `/api/ws`) |
+| PDF report download | HTTP 200, valid `%PDF` |
+| STIX download | 59 objects: identity, indicator, sighting, attack-pattern, relationship |
 
-A brute-force run that produced dozens of matching detections resulted in:
+## 6. Backup and recovery
 
-```
-channel   status       count
-telegram  sent/disabled    1     ← exactly one alert for the IP (per window)
-email     sent/disabled    1
-dedupe    suppressed      30     ← all further detections suppressed in the 10-min window
-```
+`docker compose run --rm backup once` writes a dump, a sample archive and a `.sha256` file.
+`verify` checked both files (OK). `restore <stamp>` verified the checksums first, then
+restored the database. Event and detection counts were identical afterwards.
 
-(`disabled` appears when no Telegram/SMTP credentials are configured; with credentials the
-status is `sent`. The point — one alert, not thirty — holds either way.)
+## 7. Security lint
 
-## 6. Isolation / passivity
+`bandit -r . -x ./tests,./dashboard -lll` → 0 high-severity findings. Medium findings are the
+reviewed false positives listed in v0.6, for example interval literals cast to `int()` in
+SQL, and `0.0.0.0` binds that honeypots need.
 
-- Captured download URLs (e.g. `http://198.51.100.23/arm`) are stored as IOCs and in
-  `download_attempt` events, but the honeypot **never fetches them** (verified: no outbound
-  request is made; the fake shell only prints realistic `wget` output).
-- `deploy/firewall.sh` drops outbound NEW connections from the honeynet subnet. Verify on the
-  host with:
-  `docker exec honeybot_ssh python -c "import urllib.request; urllib.request.urlopen('http://example.com', timeout=5)"` → hangs/fails.
+## 8. Not yet tested (100% milestone)
 
-## 7. Security lint (`bandit`)
-
-```
-bandit -r . -x ./tests -lll     → 0 high-severity findings
-bandit -r . -x ./tests -ll      → 22 medium findings, all reviewed:
-```
-
-| Finding | Count | Assessment |
-|---|---|---|
-| B608 hardcoded SQL | ~9 | **False positive.** All interpolation is of `int()`-cast interval literals or fixed column/clause strings; every user-supplied value uses parameterised `%s`. |
-| B310 urlopen | 1 | Telegram API call — fixed `https://api.telegram.org/...` scheme, not attacker-controlled. |
-| B104 bind 0.0.0.0 | several | Intentional — honeypots must listen on all interfaces. |
-| B108 hardcoded /tmp | few | `/tmp` strings are part of the **emulated** IoT filesystem, not real temp files. |
-| B324 MD5/SHA1 | 0 (was 7) | Cleared with `usedforsecurity=False`; RTSP Digest MD5 is mandated by RFC 2617. |
-
-## 8. What is NOT yet tested (100% work)
-
-Load testing (events/sec under stress), ML model evaluation (accuracy/F1/confusion matrix),
-and a real-internet baseline. These depend on Module 8 and a deployed VPS, which are the 100%
-milestone. The ML-evaluation metrics table is stubbed in `docs/MODEL_CARD.md`.
+Load testing (events/s), ML model evaluation (accuracy, F1, confusion matrix), a
+real-internet baseline on a VPS, and live Telegram/SMTP delivery with real credentials. The
+delivery code paths are covered, and in the lab the `disabled` status is recorded.

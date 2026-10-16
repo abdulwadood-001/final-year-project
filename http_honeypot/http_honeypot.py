@@ -32,6 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response, RedirectResp
 from common.db import Session
 from common.state import STATE, start_heartbeat
 from common.creds import is_weak
+from common import capture
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | http | %(message)s")
 log = logging.getLogger("http")
@@ -81,6 +82,10 @@ SESSIONS = HttpSessions()
 WEB_TOKENS = {}            # cookie -> username  (CCTV web login)
 
 
+def _ip(request):
+    return request.client.host if request.client else "unknown"
+
+
 def _basic(request):
     h = request.headers.get("authorization", "")
     if h.lower().startswith("basic "):
@@ -95,7 +100,7 @@ def _basic(request):
 def add_logging(app, device, server_header, port):
     @app.middleware("http")
     async def log_everything(request: Request, call_next):
-        ip = request.client.host if request.client else "unknown"
+        ip = _ip(request) if request.client else "unknown"
         sport = request.client.port if request.client else None
         ua = request.headers.get("user-agent", "")
         s = SESSIONS.get(ip, sport, device, port, ua)
@@ -121,6 +126,9 @@ def add_logging(app, device, server_header, port):
         response.headers["Server"] = server_header
         hdrs = {k: v for k, v in request.headers.items()
                 if k.lower() not in ("authorization", "cookie")}
+        if body and request.method in ("POST", "PUT", "PATCH") \
+                and not getattr(request.state, "captured", False) and capture.looks_interesting(body):
+            capture.store(s, body, "http_body", filename=request.url.path)
         s.event("http_request",
                 command=f"{request.method} {request.url.path}"
                         + (f"?{request.url.query}" if request.url.query else ""),
@@ -196,7 +204,7 @@ async def cctv_login(request: Request):
     u, p = str(form.get("username", "")), str(form.get("password", ""))
     ok = is_weak("cctv", u, p)
     request.state.hs.auth(u, p, ok, method="form", user_agent=request.headers.get("user-agent", ""))
-    log.info("CCTV %s | %s:%s | %s", request.client.host, u, p, "ACCEPT" if ok else "REJECT")
+    log.info("CCTV %s | %s:%s | %s", _ip(request), u, p, "ACCEPT" if ok else "REJECT")
     st = STATE.get("cctv")
     if not ok:
         await asyncio.sleep(1)
@@ -237,9 +245,21 @@ async def cctv_settings(request: Request):
 @cctv.post("/upgrade")
 async def cctv_upgrade(request: Request):
     body = await request.body()
-    request.state.hs.event("file_upload", payload=f"firmware upload {len(body)} bytes",
-                           sha256=hashlib.sha256(body).hexdigest(), size=len(body),
-                           path="/upgrade")
+    data, fname = body, None
+    if "multipart/form-data" in request.headers.get("content-type", ""):
+        try:                                   # keep only the uploaded file part
+            form = await request.form()
+            for v in form.values():
+                if hasattr(v, "read"):
+                    data, fname = await v.read(), getattr(v, "filename", None)
+                    break
+        except Exception:
+            pass
+    request.state.hs.event("file_upload", payload=f"firmware upload {fname or ''} {len(data)} bytes",
+                           sha256=hashlib.sha256(data).hexdigest(), size=len(data),
+                           path="/upgrade", filename=fname)
+    capture.store(request.state.hs, data, "http_upload", filename=fname or "firmware.bin")
+    request.state.captured = True
     return HTMLResponse("<html><body>Upgrade failed: invalid image header (0x0005)</body></html>",
                         status_code=200)
 
@@ -309,7 +329,7 @@ async def lock_auth(request: Request):
     u, p = str(data.get("username", "")), str(data.get("password", ""))
     ok = is_weak("smartlock", u, p)
     request.state.hs.auth(u, p, ok, method="api")
-    log.info("LOCK %s | %s:%s | %s", request.client.host, u, p, "ACCEPT" if ok else "REJECT")
+    log.info("LOCK %s | %s:%s | %s", _ip(request), u, p, "ACCEPT" if ok else "REJECT")
     if not ok:
         await asyncio.sleep(0.8)
         return JSONResponse({"error": "invalid_credentials"}, status_code=401)
@@ -335,7 +355,7 @@ async def lock_cmd(request: Request):
     except Exception:
         data = {}
     action = str(data.get("action", request.query_params.get("action", "")))
-    new = STATE.lock_action(action, actor=f"http:{request.client.host}")
+    new = STATE.lock_action(action, actor=f"http:{_ip(request)}")
     if not new:
         return JSONResponse({"error": "invalid action", "allowed": ["lock", "unlock"]}, status_code=400)
     request.state.hs.event("state_change", payload=f"lock_state={new}", device_field="lock_state",
@@ -403,7 +423,7 @@ async def sensor_config(request: Request):
         form = dict(await request.form())
     except Exception:
         form = {}
-    changed = STATE.sensor_config(actor=f"http:{request.client.host}", **{k: str(v) for k, v in form.items()})
+    changed = STATE.sensor_config(f"http:{_ip(request)}", {k: str(v) for k, v in form.items()})
     if changed:
         request.state.hs.event("state_change", payload=json.dumps(changed), via="hmi", **changed)
     return RedirectResponse("/", status_code=302)

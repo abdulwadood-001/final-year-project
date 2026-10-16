@@ -2,14 +2,18 @@
 HoneyBot-IoT — Threat Intelligence Engine worker  (replaces attack_detector.py)
 
 Every INTEL_INTERVAL seconds:
-  1. run all detection rules on the unified event store   (intel/rules.py)
-  2. store new detections with MITRE ATT&CK technique IDs (intel/mitre.py)
-  3. correlate attackers, GeoIP, campaigns, IOCs          (intel/correlate.py)
-  4. send alerts for new detections (threshold + dedupe)  (alerts/notifier.py)
+  1. YARA-scan newly captured malware samples              (intel/yara_scan.py)
+  2. run all detection rules on the unified event store   (intel/rules.py)
+  3. store new detections with MITRE ATT&CK technique IDs (intel/mitre.py)
+     and push them on Redis `honeybot:detections` (dashboard WebSocket)
+  4. correlate attackers, GeoIP, campaigns, IOCs          (intel/correlate.py)
+  5. send alerts for new detections (threshold + dedupe)  (alerts/notifier.py)
+  6. once a day: e-mail the daily threat summary report    (intel/report.py)
 """
 
 import os
 import sys
+import json
 import time
 import logging
 from datetime import datetime, timezone
@@ -17,8 +21,9 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from common.db import fetchdicts
-from common.state import start_heartbeat
-from intel import rules, correlate, mitre
+from common.state import start_heartbeat, redis_client
+from common.schema import ensure_schema
+from intel import rules, correlate, mitre, yara_scan
 from alerts import notifier
 
 INTERVAL = int(os.environ.get("INTEL_INTERVAL", 30))
@@ -66,10 +71,32 @@ def store(dets):
     return new
 
 
+def publish(new):
+    """Push new detections to the dashboard (FastAPI WebSocket relays this channel)."""
+    r = redis_client()
+    if not r:
+        return
+    for d in new:
+        try:
+            r.publish("honeybot:detections", json.dumps({
+                "id": d["id"], "timestamp": d["timestamp"], "ip": d["ip"], "attack_type": d["attack_type"],
+                "severity": d["severity"], "protocol": d.get("protocol"), "device": d.get("device"),
+                "details": d["details"], "mitre": d["mitre"], "mitre_names": d["mitre_names"],
+                "session_id": d.get("session_id")}, default=str))
+        except Exception:
+            pass
+
+
 def run_once():
     t0 = time.time()
+    scanned = 0
+    try:
+        scanned = yara_scan.scan_pending()
+    except Exception as e:
+        log.error("YARA scan failed: %s", e)
     dets = rules.run_rules()
     new = store(dets)
+    publish(new)
     try:
         correlate.run()
     except Exception as e:
@@ -82,11 +109,18 @@ def run_once():
             log.error("notifier failed: %s", e)
     for d in new:
         log.info("DETECTION %-8s %-24s %-15s %s", d["severity"], d["attack_type"], d["ip"], d["details"][:90])
-    log.info("pass: %d matches, %d new detections, %d alerts, %.2fs", len(dets), len(new), sent, time.time() - t0)
-    return {"matches": len(dets), "new_detections": len(new), "alerts_sent": sent}
+    try:
+        from intel import report
+        report.maybe_send_daily()
+    except Exception as e:
+        log.error("daily report failed: %s", e)
+    log.info("pass: %d samples scanned, %d matches, %d new detections, %d alerts, %.2fs",
+             scanned, len(dets), len(new), sent, time.time() - t0)
+    return {"samples_scanned": scanned, "matches": len(dets), "new_detections": len(new), "alerts_sent": sent}
 
 
 def main():
+    ensure_schema()
     start_heartbeat("intel", interval=10)
     log.info("Threat intelligence engine started (every %ds)", INTERVAL)
     while True:

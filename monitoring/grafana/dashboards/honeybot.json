@@ -1,0 +1,554 @@
+{
+ "uid": "honeybot-overview",
+ "title": "HoneyBot-IoT \u2014 Honeynet & Resources",
+ "schemaVersion": 39,
+ "version": 1,
+ "time": {
+  "from": "now-6h",
+  "to": "now"
+ },
+ "refresh": "30s",
+ "tags": [
+  "honeybot"
+ ],
+ "panels": [
+  {
+   "id": 1,
+   "type": "stat",
+   "title": "Events (total)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "value"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(honeybot_events_total)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "type": "stat",
+   "title": "Attacker IPs",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 4,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "value"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "honeybot_unique_attackers",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "type": "stat",
+   "title": "Active sessions",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "value"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(honeybot_active_sessions) or vector(0)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "type": "stat",
+   "title": "Critical detections",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "value"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(honeybot_detections_total{severity=\"CRITICAL\"}) or vector(0)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 5,
+   "type": "stat",
+   "title": "Malware samples",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "value"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(honeybot_samples)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 6,
+   "type": "stat",
+   "title": "Services up",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 20,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "value"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(honeybot_service_up)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 7,
+   "type": "timeseries",
+   "title": "Attack events per second, by protocol",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 4,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ops",
+     "custom": {
+      "stacking": {
+       "mode": "normal"
+      },
+      "fillOpacity": 15
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (protocol) (rate(honeybot_events_total[5m]))",
+     "legendFormat": "{{protocol}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 8,
+   "type": "timeseries",
+   "title": "Detections per minute, by severity",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 4,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "stacking": {
+       "mode": "normal"
+      },
+      "fillOpacity": 15
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (severity) (rate(honeybot_detections_total[5m]))*60",
+     "legendFormat": "{{severity}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 9,
+   "type": "timeseries",
+   "title": "Login attempts per second",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "stacking": {
+       "mode": "none"
+      },
+      "fillOpacity": 15
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (protocol, result) (rate(honeybot_auth_attempts_total[5m]))",
+     "legendFormat": "{{protocol}} {{result}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 10,
+   "type": "timeseries",
+   "title": "Honeypot service heartbeat",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "stacking": {
+       "mode": "none"
+      },
+      "fillOpacity": 15
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "honeybot_service_up",
+     "legendFormat": "{{service}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 11,
+   "type": "timeseries",
+   "title": "Container CPU (cores)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 20,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "stacking": {
+       "mode": "none"
+      },
+      "fillOpacity": 15
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"honeybot_.*\"}[1m]))",
+     "legendFormat": "{{name}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 12,
+   "type": "timeseries",
+   "title": "Container memory",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 20,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes",
+     "custom": {
+      "stacking": {
+       "mode": "none"
+      },
+      "fillOpacity": 15
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (name) (container_memory_working_set_bytes{name=~\"honeybot_.*\"})",
+     "legendFormat": "{{name}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 13,
+   "type": "timeseries",
+   "title": "Container network received",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 28,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "Bps",
+     "custom": {
+      "stacking": {
+       "mode": "none"
+      },
+      "fillOpacity": 15
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (name) (rate(container_network_receive_bytes_total{name=~\"honeybot_.*\"}[1m]))",
+     "legendFormat": "{{name}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  },
+  {
+   "id": 14,
+   "type": "timeseries",
+   "title": "Container disk I/O",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "honeybot-prom"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 28,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "Bps",
+     "custom": {
+      "stacking": {
+       "mode": "none"
+      },
+      "fillOpacity": 15
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (name) (rate(container_fs_writes_bytes_total{name=~\"honeybot_.*\"}[1m]))",
+     "legendFormat": "{{name}} write",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "honeybot-prom"
+     }
+    }
+   ]
+  }
+ ]
+}

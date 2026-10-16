@@ -78,10 +78,49 @@ def _now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+HISTORY_LEN = 720          # sensor samples kept (720 × 5 s tick = 1 hour)
+CHANGES_LEN = 200          # attacker-made state changes kept per device
+
+
 class DeviceState:
     def __init__(self):
         self._mem = {d: dict(v) for d, v in DEFAULTS.items()}
+        self._mem_lists = {}
         self._lock = threading.Lock()
+
+    # ── bounded lists (sensor history, change log) ───────────────────────────
+    def _push(self, key, item, maxlen):
+        data = json.dumps(item)
+        r = redis_client()
+        if r:
+            try:
+                r.lpush(key, data)
+                r.ltrim(key, 0, maxlen - 1)
+                return
+            except Exception:
+                pass
+        with self._lock:
+            lst = self._mem_lists.setdefault(key, [])
+            lst.insert(0, data)
+            del lst[maxlen:]
+
+    def _range(self, key, n):
+        r = redis_client()
+        if r:
+            try:
+                return [json.loads(x) for x in r.lrange(key, 0, n - 1)]
+            except Exception:
+                pass
+        with self._lock:
+            return [json.loads(x) for x in self._mem_lists.get(key, [])[:n]]
+
+    def history(self, device="sensor", n=HISTORY_LEN):
+        """Newest-first telemetry samples (sensor) written by the simulation tick."""
+        return self._range(f"history:{device}", n)
+
+    def changes(self, device, n=50):
+        """Newest-first log of state changes made by attackers (or auto-lock)."""
+        return self._range(f"changes:{device}", n)
 
     # ── basic access ──────────────────────────────────────────────────────
     def init_defaults(self):
@@ -121,6 +160,9 @@ class DeviceState:
         if not written:
             with self._lock:
                 self._mem.setdefault(device, {}).update(fields)
+        if actor != "system":           # the simulation tick is not interesting history
+            self._push(f"changes:{device}", {"ts": _now(), "actor": actor, "fields": fields},
+                       CHANGES_LEN)
         return fields
 
     # ── device-level actions (used by every protocol) ─────────────────────
@@ -136,9 +178,12 @@ class DeviceState:
                  last_actor=actor, last_change=_now())
         return new
 
-    def sensor_config(self, actor, **cfg):
-        allowed = {"temp_threshold", "pressure_threshold", "interval", "mode", "alarm"}
-        clean = {k: v for k, v in cfg.items() if k in allowed}
+    SENSOR_WRITABLE = ("temp_threshold", "pressure_threshold", "interval", "mode", "alarm")
+
+    def sensor_config(self, actor, cfg):
+        """Apply attacker-supplied sensor settings. `cfg` is a plain dict, so a
+        form field called e.g. `actor` can no longer collide with the keyword."""
+        clean = {k: str(v)[:64] for k, v in (cfg or {}).items() if k in self.SENSOR_WRITABLE}
         if clean:
             self.set("sensor", actor=actor, **clean)
         return clean
@@ -163,6 +208,9 @@ class DeviceState:
                 alarm = "PRESSURE_HIGH"
             self.set("sensor", temperature=f"{t:.1f}", pressure=f"{p:.1f}",
                      humidity=f"{h:.1f}", alarm=alarm)
+            self._push("history:sensor", {"ts": _now(), "temperature": round(t, 1),
+                                          "pressure": round(p, 1), "humidity": round(h, 1),
+                                          "alarm": alarm}, HISTORY_LEN)
         except (KeyError, ValueError):
             self.set("sensor", **DEFAULTS["sensor"])
 

@@ -1,0 +1,53 @@
+@startuml
+!include _style.iuml
+|Analyst / Scheduler|
+start
+if (Trigger?) then (analyst)
+  :Choose period (24 h / 7 d / 30 d)
+  on Reports & Alerts page;
+  :Click PDF report, STIX 2.1 or CSV;
+else (intel engine pass)
+  :report.maybe_send_daily();
+  if (After REPORT_HOUR_UTC and SMTP configured?) then (no)
+    stop
+  else (yes)
+  endif
+  if (Already sent today? (intel_state)) then (yes)
+    stop
+  else (no)
+  endif
+endif
+|Report / Export Service|
+if (Output?) then (STIX 2.1)
+  :Load IOCs, sightings, detections,
+  captures and attacker techniques;
+  :Build identity, indicators with STIX patterns
+  (url, domain, ipv4, file SHA-256);
+  :Add sightings with exact hit counts;
+  :Add attack-patterns (ATT&CK Enterprise + ICS)
+  and malware families;
+  :Link with 'indicates' relationships;
+  :Deterministic UUIDv5 IDs
+  and de-duplicate objects;
+  :Return bundle JSON;
+else (PDF / summary)
+  :build_report(hours): counts, logins,
+  detections by type and severity,
+  top attackers, IOCs, samples;
+  :Write rule-based analyst summary
+  (demo GeoIP labelled as such);
+  :render_pdf(): tables and embedded charts;
+endif
+|Analyst / Scheduler|
+if (Requested by analyst?) then (yes)
+  :Browser downloads the file;
+else (no)
+  :E-mail daily report (and weekly on Mondays)
+  with the PDF attached;
+  :Log DAILY_REPORT / WEEKLY_REPORT
+  in the alerts table;
+  :Store date in intel_state
+  (one attempt per day);
+endif
+stop
+@enduml

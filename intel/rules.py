@@ -10,7 +10,7 @@ one detection per bucket instead of one per run.
 The six ML classes planned for Module 8 map onto these rule outputs, so the
 rules double as weak labels for the classifier later:
     brute-force      ← BRUTE_FORCE, CREDENTIAL_STUFFING
-    malware delivery ← MALWARE_DELIVERY, MIRAI_SIGNATURE
+    malware delivery ← MALWARE_DELIVERY, MIRAI_SIGNATURE, MALWARE_FAMILY
     botnet C2        ← BOTNET_C2, ICS_UNAUTHORIZED_COMMAND
     port scan        ← RECONNAISSANCE, WEB_SCAN, RTSP_ROUTE_ENUM
     protocol exploit ← PROTOCOL_EXPLOIT
@@ -161,15 +161,35 @@ def malware_delivery():
                         f"Download of {n} payload(s): {urls[:180]}"
                         + (" — and attempted to execute it" if sev == "CRITICAL" else ""),
                         proto, dev, sid))
+    # samples quarantined by common/capture.py (uploads, SSH stdin/scp, shell drops, MQTT blobs)
     rows = fetchall("""
-        SELECT ip, protocol, device, session_id, COUNT(*) FROM events
-        WHERE event_type IN ('file_write','file_upload') AND ts > NOW() - INTERVAL '15 minutes'
-          AND (payload LIKE %s OR (raw->>'size')::int > 512)
+        SELECT ip, protocol, device, session_id, COUNT(*), string_agg(DISTINCT coalesce(arch, mime_type), ', '),
+               string_agg(DISTINCT source, ', ')
+        FROM file_captures WHERE ts > NOW() - INTERVAL '15 minutes'
         GROUP BY ip, protocol, device, session_id
-    """, ("\x7fELF%",))
-    for ip, proto, dev, sid, n in rows:
+    """)
+    for ip, proto, dev, sid, n, kinds, sources in rows:
         out.append(_det(ip, "MALWARE_DELIVERY", "HIGH",
-                        f"{n} binary/large file(s) written or uploaded", proto, dev, sid))
+                        f"{n} sample(s) captured via {sources}: {kinds}", proto, dev, sid))
+    return out
+
+
+def malware_family():
+    """YARA identified a known IoT malware family in a captured sample."""
+    rows = fetchall("""
+        SELECT ip, protocol, device, session_id, string_agg(DISTINCT yara_result, '; '),
+               string_agg(DISTINCT left(sha256, 16), ', ')
+        FROM file_captures
+        WHERE scanned_at > NOW() - INTERVAL '30 minutes'
+          AND yara_result NOT IN ('CLEAN', 'UNAVAILABLE', 'ERROR')
+        GROUP BY ip, protocol, device, session_id
+    """)
+    out = []
+    for ip, proto, dev, sid, fams, shas in rows:
+        generic_only = all(f.strip() in ("generic-iot-elf", "upx-packed")
+                           for part in (fams or "").split(";") for f in part.split(","))
+        out.append(_det(ip, "MALWARE_FAMILY", "HIGH" if generic_only else "CRITICAL",
+                        f"YARA: {fams} (sha256 {shas}…)", proto, dev, sid))
     return out
 
 
@@ -278,7 +298,7 @@ def multi_protocol():
 
 
 ALL_RULES = [brute_force, credential_compromise, credential_stuffing, reconnaissance,
-             malware_delivery, mirai_and_post_exploitation, mqtt_and_ics, protocol_exploit,
+             malware_delivery, malware_family, mirai_and_post_exploitation, mqtt_and_ics, protocol_exploit,
              stream_access, multi_protocol]
 
 

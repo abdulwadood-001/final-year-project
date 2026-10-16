@@ -1,0 +1,69 @@
+@startuml
+!include _style.iuml
+|Attacker|
+start
+:Send a device command on any protocol
+(SSH lockctl unlock · HTTP POST /api/v1/lock ·
+MQTT lock/cmd · Telnet sensorctl set · HMI form);
+|Protocol Handler|
+:Authenticate request
+(session login, bearer token,
+Basic auth or anonymous MQTT);
+if (Authorised?) then (no)
+  :Return device-specific error
+  and log 'auth' event;
+  |Attacker|
+  stop
+else (yes)
+endif
+|Protocol Handler|
+:Parse command into a device action;
+if (Action recognised and field writable?) then (no)
+  :Answer like the real firmware
+  ("invalid command" / 400 / ignored);
+  :Log command or request event;
+  |Attacker|
+  stop
+else (yes)
+endif
+|Device State Manager|
+:STATE.lock_action() or
+STATE.sensor_config(whitelisted keys);
+if (Redis reachable?) then (yes)
+  :HSET device:* hash;
+  :PUBLISH honeybot:state;
+else (no)
+  :Update in-memory fallback state;
+endif
+:Append to changes:* list
+(actor, protocol, fields, last 200);
+|Protocol Handler|
+:Log 'state_change' event
+(feeds ICS_UNAUTHORIZED_COMMAND);
+:Reply with new state;
+|Attacker|
+:Read state on another protocol
+(MQTT lock/status, HTTP status,
+cat /etc/lock_state) — same value;
+stop
+|Device State Manager|
+start
+partition "Background: device_state service (every 5 s)" {
+repeat
+  :Simulate sensor readings,
+  camera motion and lock battery;
+  :Push sample to history:sensor (last 720);
+  if (Temperature or pressure above threshold?) then (yes)
+    :Set alarm = TEMP_HIGH / PRESSURE_HIGH;
+  else (no)
+    :Set alarm = none;
+  endif
+  if (Lock unlocked > 60 s and auto-lock on?) then (yes)
+    :Re-lock (actor = auto_lock);
+    :PUBLISH honeybot:state;
+  else (no)
+  endif
+repeat while (Service running?) is (yes) not (no)
+}
+stop
+@enduml

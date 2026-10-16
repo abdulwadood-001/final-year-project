@@ -20,7 +20,8 @@ log = logging.getLogger("geo")
 
 CANDIDATES = [os.environ.get("GEOIP_DB", "/app/geoip/GeoLite2-City.mmdb"),
               "/app/geoip/dbip-city-lite.mmdb", "/app/geoip/GeoLite2-City.mmdb"]
-DEMO = os.environ.get("GEO_DEMO_MODE", "true").lower() == "true"
+# default OFF in code: fabricated lab locations must be an explicit, visible choice
+DEMO = os.environ.get("GEO_DEMO_MODE", "false").lower() == "true"
 
 # Plausible attack-origin cities used ONLY for lab traffic in demo mode
 DEMO_CITIES = [

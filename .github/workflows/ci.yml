@@ -2,7 +2,7 @@ name: CI
 on: [push, pull_request]
 
 jobs:
-  test:
+  backend:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -29,16 +29,33 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Load database schema
         run: psql "$DATABASE_URL" -f init.sql
-      - name: Run tests
+      - name: Run tests (parsers, fake shell, capture, YARA, STIX, report, API, WebSocket)
         run: pytest -q
       - name: Security lint (bandit)
-        run: bandit -r . -x ./tests -lll     # fail only on high-severity
+        run: bandit -r . -x ./tests,./dashboard -lll     # fail only on high-severity
+      - name: Shell scripts
+        run: bash -n deploy/firewall.sh && sh -n deploy/backup.sh && sh -n deploy/auth-init.sh
 
-  build:
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: dashboard }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build          # includes tsc --noEmit
+
+  images:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build images
+      - name: Validate compose file (all profiles)
         run: |
           cp .env.example .env
-          docker compose build
+          docker compose --profile monitoring --profile sim config -q
+      - name: Build images
+        run: docker compose build

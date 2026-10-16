@@ -1,13 +1,17 @@
+# HoneyBot-IoT — image for the REST/WebSocket API and the threat-intelligence engine
 FROM python:3.12-slim
-RUN useradd -m -u 10002 honey && mkdir -p /app/data && chown -R honey /app
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+RUN useradd -m -u 10001 honey && mkdir -p /app/data /app/captures && chown -R honey /app
 WORKDIR /app
 COPY requirements-base.txt requirements-api.txt ./
 RUN pip install --no-cache-dir -r requirements-api.txt
+COPY init.sql ./init.sql
 COPY common/ ./common/
 COPY intel/ ./intel/
 COPY alerts/ ./alerts/
 COPY api/ ./api/
+COPY ml/ ./ml/
 COPY geoip/ ./geoip/
 USER honey
 EXPOSE 5000
-CMD ["python","-m","uvicorn","api.api:app","--host","127.0.0.1","--port","5000"]
+CMD ["python","-m","uvicorn","api.api:app","--host","0.0.0.0","--port","5000"]

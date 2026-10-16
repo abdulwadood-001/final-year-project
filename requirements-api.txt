@@ -3,3 +3,6 @@ fastapi==0.110.0
 uvicorn[standard]==0.29.0
 python-multipart==0.0.9
 geoip2==4.8.0
+# v0.7: malware classification + PDF threat reports
+yara-python==4.5.1
+reportlab==4.2.5

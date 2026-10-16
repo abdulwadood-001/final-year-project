@@ -1,0 +1,35 @@
+@startuml
+!include _style.iuml
+start
+:Request dataset
+(GET /api/ml/dataset.csv, Reports page
+or python -m ml.features);
+:Select sessions of the last N days;
+repeat :Take next session;
+  :Aggregate its events: duration, auth counts,
+  success ratio, distinct usernames and passwords;
+  :Count commands, downloads, exec and file events,
+  HTTP 404s, MQTT control publishes, wildcard
+  subscriptions, RTSP probes, malformed packets;
+  :Command keyword flags and inter-event
+  timing (mean, standard deviation);
+  :Protocol mix of the same IP within ±1 h;
+  :Collect rule detections that touch the session;
+  if (Any detection?) then (no)
+    :label = normal;
+  else (yes)
+    :Map attack types to the six scope classes;
+    :Keep the highest-priority class
+    (malware_delivery > botnet_c2 > protocol_exploit
+    > brute_force > port_scan);
+  endif
+repeat while (More sessions?) is (yes) not (no)
+:Write CSV (one feature vector per session);
+:Summary: class balance and feature list;
+note right
+  100% milestone: train XGBoost (5-fold CV)
+  and Isolation Forest on this dataset,
+  compare with the rule baseline
+end note
+stop
+@enduml

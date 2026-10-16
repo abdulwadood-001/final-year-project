@@ -3,3 +3,5 @@
 pytest==8.1.1
 httpx==0.27.0
 bandit==1.7.8
+# used only by the tests to validate the STIX 2.1 export against the OASIS spec
+stix2==3.0.1

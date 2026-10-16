@@ -1,0 +1,64 @@
+@startuml
+!include _style.iuml
+|Operator|
+start
+:cp .env.example .env
+and set passwords;
+:docker compose up -d --build;
+|Docker Compose|
+:Build images and create networks:
+honeynet, backnet (internal), frontnet, egress;
+fork
+  :auth-init: write bcrypt htpasswd
+  (generate and print a password if empty);
+fork again
+  :Start PostgreSQL 16 and Redis 7;
+  :db healthcheck (pg_isready);
+fork again
+  :Start firewall service
+  (host network, CAP_NET_ADMIN);
+  :Detect iptables backend (nft / legacy);
+  :Insert tagged DOCKER-USER rules:
+  allow replies and internal subnets,
+  LOG + DROP all other honeynet traffic;
+  :Healthcheck: firewall.sh check;
+end fork
+if (db healthy and firewall healthy?) then (no)
+  :Honeypots are not started
+  (no exposure without isolation);
+  |Operator|
+  :Inspect logs and firewall.sh status;
+  stop
+else (yes)
+endif
+|Docker Compose|
+fork
+  :Start 5 honeypots
+  (non-root, read-only, cap_drop ALL,
+  CPU and memory limits);
+fork again
+  :Start API and intel engine;
+  :ensure_schema() under advisory lock
+  (idempotent init.sql migration);
+fork again
+  :Start device_state and backup services;
+end fork
+:Start Nginx after auth-init completed
+and API healthy;
+|Operator|
+:Verify: docker compose ps,
+log in on :80, run the simulator;
+stop
+|Firewall service|
+start
+partition "Background: firewall loop" {
+repeat
+  :Every 30 s: firewall.sh ensure;
+  if (Any rule missing (Docker restart, flush)?) then (yes)
+    :Re-apply rules;
+  else (no)
+  endif
+repeat while (Stack running?) is (yes) not (no)
+}
+stop
+@enduml

@@ -1,0 +1,67 @@
+@startuml
+!include _style.iuml
+|Analyst Browser|
+start
+:Open http://host/;
+|Nginx|
+:Request HTTP Basic credentials;
+if (bcrypt check passes?) then (no)
+  :401 Unauthorized;
+  stop
+else (yes)
+endif
+:Serve React SPA (strict CSP)
+and proxy /api and /api/ws to the API;
+|Analyst Browser|
+:Load pages through TanStack Query
+(REST: stats, timeline, map, detections ...);
+:Open WebSocket /api/ws;
+|API (FastAPI)|
+:Accept socket and subscribe to Redis
+honeybot:events, :detections, :state;
+if (Redis available?) then (no)
+  :Send 'error' message and close;
+  |Analyst Browser|
+  :Status = offline, keep polling REST;
+  :Reconnect with back-off (2 s ... 64 s);
+  stop
+else (yes)
+endif
+|API (FastAPI)|
+:Send 'hello' with version;
+|Analyst Browser|
+:Status = live;
+|API (FastAPI)|
+repeat
+  :Wait up to 1 s for a Redis message;
+  if (Message received?) then (yes)
+    :Forward channel and data to the browser;
+    |Analyst Browser|
+    switch (Channel?)
+    case (event)
+      :Prepend to live feed,
+      count events per minute;
+    case (detection)
+      :Prepend to detections;
+      if (HIGH or CRITICAL?) then (yes)
+        :Show toast;
+      else (no)
+      endif
+    case (state)
+      :Mark device queries dirty;
+    endswitch
+    :Re-fetch dirty counts, charts and map
+    (throttled to once every 3 s);
+    |API (FastAPI)|
+  else (no)
+    if (Idle > 25 s?) then (yes)
+      :Send ping (keeps proxies open);
+    else (no)
+    endif
+  endif
+repeat while (Browser still connected?) is (yes) not (no)
+:Unsubscribe and close Redis connection;
+|Analyst Browser|
+:On unexpected close: reconnect with back-off;
+stop
+@enduml

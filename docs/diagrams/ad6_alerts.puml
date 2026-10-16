@@ -1,0 +1,48 @@
+@startuml
+!include _style.iuml
+start
+:Intel engine stores new detections;
+:notifier.notify(new detections);
+:Sort strongest severity first;
+repeat :Take next detection;
+  if (Type enabled and severity >= threshold
+  in alerts.yaml?) then (no)
+    :Skip (stays visible on dashboard);
+  else (yes)
+    :Add GeoIP city and country;
+    :Format text and HTML message
+    (type, IP, device, MITRE IDs);
+    :Look up last alert sent for this IP
+    within dedupe window (10 min);
+    if (Alerted already with equal or higher severity?) then (yes)
+      :Record channel = dedupe,
+      status = suppressed;
+    else (no)
+      if (Earlier lower-severity alert exists?) then (yes)
+        :Prefix message with ESCALATION;
+      else (no)
+      endif
+      fork
+        if (Telegram token and chat ID set?) then (yes)
+          :Send via Telegram Bot API;
+          :status = sent or failed;
+        else (no)
+          :status = disabled;
+        endif
+        :Record telegram row in alerts;
+      fork again
+        if (SMTP host and recipient set?) then (yes)
+          :Send HTML e-mail (STARTTLS);
+          :status = sent or failed;
+        else (no)
+          :status = disabled;
+        endif
+        :Record email row in alerts;
+      end fork
+      :Mark detection alerted = TRUE;
+    endif
+  endif
+repeat while (More detections?) is (yes) not (no)
+:Alert log shown on Reports & Alerts page;
+stop
+@enduml
