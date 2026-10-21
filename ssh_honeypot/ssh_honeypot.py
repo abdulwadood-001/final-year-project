@@ -25,6 +25,7 @@ from common.fakeshell import FakeShell
 from common.state import STATE, start_heartbeat
 from common.creds import is_weak
 from common import capture
+from common import realshell
 
 PORT = int(os.environ.get("SSH_PORT", 2222))
 DEVICE = "smartlock"
@@ -55,7 +56,8 @@ class HoneySSH(paramiko.ServerInterface):
         self.channels = {}          # chanid -> {"event": Event, "exec": str|None}
 
     def _chan(self, chanid):
-        return self.channels.setdefault(chanid, {"event": threading.Event(), "exec": None})
+        return self.channels.setdefault(chanid, {"event": threading.Event(), "exec": None,
+                                                  "term": None, "cols": 80, "rows": 24})
 
     def get_allowed_auths(self, username):
         return "password,publickey"
@@ -88,6 +90,14 @@ class HoneySSH(paramiko.ServerInterface):
 
     def check_channel_pty_request(self, channel, term, width, height, pw, ph, modes):
         self.term = term
+        c = self._chan(channel.get_id())
+        c["term"] = term.decode() if isinstance(term, bytes) else term
+        c["cols"], c["rows"] = width or 80, height or 24
+        return True
+
+    def check_channel_window_change_request(self, channel, width, height, pw, ph):
+        c = self._chan(channel.get_id())
+        c["cols"], c["rows"] = width or 80, height or 24
         return True
 
     def check_channel_shell_request(self, channel):
@@ -222,12 +232,60 @@ def scp_sink(chan, shell, session, target):
     return files
 
 
+def _real_interactive(chan, session, meta):
+    """Attach the channel to a throw-away device machine (real restricted shell)."""
+    user = session.username or "root"
+    cols, rows = meta.get("cols") or 80, meta.get("rows") or 24
+    with realshell.RealShellSession(session, DEVICE, user) as rs:
+        rs.open(tty=True, cols=cols, rows=rows, term=meta.get("term") or "vt100")
+
+        def reader():
+            try:
+                return chan.recv(65536)
+            except Exception:
+                return b""
+
+        def writer(data):
+            chan.sendall(data)
+
+        rs.attach(reader, writer)
+
+
+def _real_exec(chan, session, cmd):
+    """Run one `ssh host "cmd"` request inside the device machine."""
+    with realshell.RealShellSession(session, DEVICE, session.username or "root") as rs:
+        rs.open(tty=False, cmd=cmd)
+
+        def reader():
+            try:
+                return chan.recv(65536)
+            except Exception:
+                return b""
+
+        def writer(data):
+            chan.sendall(data)
+
+        rs.attach(reader, writer)
+        chan.send_exit_status(rs.exit_code or 0)
+
+
 def serve_channel(chan, meta, session):
     shell = FakeShell(DEVICE, session=session, user=session.username or "root")
     try:
         cmd = meta["exec"]
         scp = SCP_SINK_RE.match(cmd) if cmd else None
         sink = STDIN_SINK_RE.search(cmd) if cmd and not scp else None
+        # Real restricted shell (sandboxed device machine) when enabled for this device.
+        # scp / stdin-sink uploads keep the dedicated capture path above either way.
+        if realshell.enabled_for(DEVICE) and not scp and not sink:
+            try:
+                if cmd is not None:
+                    _real_exec(chan, session, cmd)
+                else:
+                    _real_interactive(chan, session, meta)
+                return
+            except realshell.SandboxUnavailable as e:
+                log.warning("sandbox unavailable, using fake shell: %s", e)
         if scp:
             session.command(cmd, output="")
             scp_sink(chan, shell, session, scp.group(1))

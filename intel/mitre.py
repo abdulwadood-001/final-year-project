@@ -39,6 +39,14 @@ NAMES = {
     "T1499":     "Endpoint Denial of Service",
     "T1584.005": "Compromise Infrastructure: Botnet",
     "T1027":     "Obfuscated Files or Information",
+    "T1037":     "Boot or Logon Initialization Scripts",
+    "T1037.004": "Boot or Logon Initialization Scripts: RC Scripts",
+    "T1562.004": "Impair Defenses: Disable or Modify System Firewall",
+    "T1562.001": "Impair Defenses: Disable or Modify Tools",
+    "T1496":     "Resource Hijacking",
+    "T1611":     "Escape to Host",
+    "T1610":     "Deploy Container",
+    "T1572":     "Protocol Tunneling",
     # ICS
     "T0812": "ICS: Default Credentials",
     "T0855": "ICS: Unauthorized Command Message",
@@ -46,9 +54,11 @@ NAMES = {
     "T0801": "ICS: Monitor Process State",
     "T0846": "ICS: Remote System Discovery",
     "T0815": "ICS: Denial of View",
+    "T0814": "ICS: Denial of Service",
     "T0883": "ICS: Internet Accessible Device",
     "T0866": "ICS: Exploitation of Remote Services",
     "T0869": "ICS: Standard Application Layer Protocol",
+    "T0831": "ICS: Manipulation of Control",
 }
 
 TECHNIQUES_BY_TYPE = {
@@ -69,6 +79,15 @@ TECHNIQUES_BY_TYPE = {
     "MULTI_PROTOCOL_ATTACK":   ["T1046", "T1110"],
     "VIDEO_STREAM_ACCESS":     ["T1125", "T1078.001"],
     "DENIAL_OF_VIEW":          ["T0815"],
+    "PERSISTENCE":             ["T1053.003", "T1037.004", "T1037"],
+    "DEFENSE_EVASION":         ["T1070.004", "T1562.004", "T1562.001", "T1489"],
+    "DENIAL_OF_SERVICE":       ["T1499", "T0814"],
+    "CRYPTO_MINING":           ["T1496"],
+    "CONTAINER_ESCAPE":        ["T1611", "T1610"],
+    "REVERSE_SHELL":           ["T1059.004", "T1572"],
+    "MQTT_FLOOD":              ["T1499", "T0814"],
+    "ICS_PARAMETER_TAMPERING": ["T0836", "T0831", "T0855"],
+    "ICS_DEVICE_SCAN":         ["T0846", "T0801"],
 }
 
 COMMAND_RULES = [
@@ -87,7 +106,12 @@ COMMAND_RULES = [
     (r"/etc/shadow|/etc/passwd|config\.json",           "T1552.001"),
     (r"/bin/busybox\s+[A-Z]{4,}",                       "T1584.005"),
     (r"echo\s+-e\s+['\"]?\\\\x",                        "T1027"),
-    (r"\b(lockctl|sensorctl)\b",                        "T0855"),
+    (r"\b(lockctl|sensorctl|camctl)\b",                 "T0855"),
+    (r"\b(xmrig|minerd|cpuminer|cgminer)\b|stratum\+tcp", "T1496"),
+    (r"/dev/tcp/|\bnc\b.*-e|mkfifo\b.*\|\s*sh",          "T1572"),
+    (r"\bnsenter\b|/proc/1/|\bunshare\b|docker\.sock|/dev/mem", "T1611"),
+    (r"\biptables\s+-F\b|\bufw\s+disable\b",             "T1562.004"),
+    (r":\(\)\s*\{\s*:\|",                                "T1499"),
 ]
 _COMPILED = [(re.compile(rx), tid) for rx, tid in COMMAND_RULES]
 

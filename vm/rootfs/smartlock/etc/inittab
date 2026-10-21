@@ -1,0 +1,5 @@
+::sysinit:/bin/true
+::respawn:/usr/sbin/dropbear -R -p 22
+::respawn:/usr/bin/lockd --config /etc/smartlock/config.json
+::respawn:/usr/bin/mqtt_bridge -h 127.0.0.1
+::respawn:/usr/sbin/lighttpd -f /etc/lighttpd.conf

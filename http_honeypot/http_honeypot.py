@@ -33,6 +33,7 @@ from common.db import Session
 from common.state import STATE, start_heartbeat
 from common.creds import is_weak
 from common import capture
+from http_honeypot import exploits
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | http | %(message)s")
 log = logging.getLogger("http")
@@ -118,11 +119,26 @@ def add_logging(app, device, server_header, port):
             request.state.basic_ok = ok
         else:
             request.state.basic_ok = False
-        try:
-            response = await call_next(request)
-        except Exception as e:
-            log.debug("handler error %s", e)
-            response = Response("Internal Server Error", status_code=500)
+        handler = exploits.match(request.url.path, request.method)
+        if handler is not None:
+            try:
+                result = await asyncio.to_thread(
+                    handler, device, s, request, request.url.path, request.url.query, body)
+            except Exception as e:
+                log.debug("exploit handler error %s", e)
+                result = None
+            if result is not None:
+                request.state.captured = True
+                status, media, payload = result
+                response = Response(payload, status_code=status, media_type=media)
+            else:
+                response = await call_next(request)
+        else:
+            try:
+                response = await call_next(request)
+            except Exception as e:
+                log.debug("handler error %s", e)
+                response = Response("Internal Server Error", status_code=500)
         response.headers["Server"] = server_header
         hdrs = {k: v for k, v in request.headers.items()
                 if k.lower() not in ("authorization", "cookie")}
@@ -466,15 +482,23 @@ async def main():
     start_heartbeat("http", port=CCTV_PORT, device="cctv,smartlock,sensor", protocol="HTTP")
     common = dict(host="0.0.0.0", log_level="warning", server_header=False, date_header=True,
                   proxy_headers=False)
-    servers = [uvicorn.Server(uvicorn.Config(cctv, port=CCTV_PORT, **common)),
-               uvicorn.Server(uvicorn.Config(lock, port=LOCK_PORT, **common)),
-               uvicorn.Server(uvicorn.Config(sensor, port=SENSOR_PORT, **common))]
-    try:
-        key_p, crt_p = ensure_cert()
-        servers.append(uvicorn.Server(uvicorn.Config(cctv, port=CCTV_TLS_PORT, ssl_keyfile=key_p,
-                                                     ssl_certfile=crt_p, **common)))
-    except Exception as e:
-        log.warning("HTTPS disabled: %s", e)
+    # HTTP_DEVICES limits which device web services this process serves, so one
+    # device "machine" container runs only its own HTTP front-end (default: all).
+    want = {d.strip() for d in os.environ.get("HTTP_DEVICES", "cctv,smartlock,sensor").split(",") if d.strip()}
+    by_device = {"cctv": [(cctv, CCTV_PORT)], "smartlock": [(lock, LOCK_PORT)],
+                 "sensor": [(sensor, SENSOR_PORT)]}
+    servers = [uvicorn.Server(uvicorn.Config(app, port=port, **common))
+               for dev in want for app, port in by_device.get(dev, [])]
+    if "cctv" in want:
+        try:
+            key_p, crt_p = ensure_cert()
+            servers.append(uvicorn.Server(uvicorn.Config(cctv, port=CCTV_TLS_PORT, ssl_keyfile=key_p,
+                                                         ssl_certfile=crt_p, **common)))
+        except Exception as e:
+            log.warning("HTTPS disabled: %s", e)
+    if not servers:
+        log.error("HTTP_DEVICES=%s selected no services", want)
+        return
     for s in servers:
         s.install_signal_handlers = lambda: None
     log.info("HTTP honeypots: CCTV :%d (TLS :%d)  SmartLock :%d  Sensor :%d",

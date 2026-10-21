@@ -64,6 +64,20 @@ PROFILES = {
                   ("141", "root", "/usr/bin/modbusd -p 502"),
                   ("150", "root", "/usr/bin/mqtt_pub -i 5")],
     },
+    "cctv": {
+        "hostname": "IPC-HFW2431S",
+        "arch": "armv7l",
+        "kernel": "3.18.20",
+        "kernel_build": "#1 PREEMPT Sat May 12 10:21:33 CST 2018",
+        "cpu": "ARMv7 Processor rev 1 (v7l)",
+        "mem_kb": 128596,
+        "ip": "192.168.1.108", "mac": "6C:02:E1:A4:B9:F3",
+        "busybox": "BusyBox v1.27.2 (2018-05-12 10:19:44 CST) multi-call binary.",
+        "procs": [("1", "root", "init"), ("142", "root", "/usr/sbin/boa -c /etc/boa"),
+                  ("165", "root", "/usr/bin/sonia"),
+                  ("188", "root", "/usr/bin/dvrhelper"),
+                  ("201", "root", "/usr/sbin/telnetd -l /bin/sh")],
+    },
 }
 
 
@@ -147,6 +161,18 @@ class FakeShell:
             self.files["/var/log/lock.log"] = f"{_ts()} lockd: door locked (keypad)\n"
             self.dynamic["/etc/lock_state"] = lambda: self.state.field("smartlock", "lock_state") + "\n"
             self.dynamic["/var/lib/smartlock/battery"] = lambda: self.state.field("smartlock", "battery") + "\n"
+        elif self.device == "cctv":
+            self.dirs.update({"/etc/config", "/mnt/mtd", "/var/run"})
+            self.files["/usr/bin/camctl"] = elf
+            self.files["/usr/bin/sonia"] = elf
+            self.files["/usr/sbin/boa"] = elf
+            self.files["/etc/config/network"] = (
+                "config interface 'lan'\n\toption proto 'static'\n"
+                f"\toption ipaddr '{p['ip']}'\n\toption netmask '255.255.255.0'\n")
+            self.files["/var/log/messages"] = f"{_ts()} {p['hostname']} sonia: RTSP server started on 554\n"
+            self.dynamic["/proc/cam"] = lambda: "".join(
+                f"{k}: {self.state.field('cctv', k)}\n"
+                for k in ("status", "recording", "resolution", "motion"))
         else:
             self.files["/usr/bin/sensorctl"] = elf
             self.files["/usr/bin/sensor_daemon"] = elf

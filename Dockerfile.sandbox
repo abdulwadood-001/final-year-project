@@ -1,0 +1,15 @@
+# HoneyBot-IoT — sandbox service: starts throw-away device machines for the real,
+# restricted shell. It talks to the Docker daemon (socket mounted read-only) and is
+# the ONLY component that does, so it never joins the attacker-facing honeynet.
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+RUN useradd -m -u 10002 sandbox && mkdir -p /app && chown -R sandbox /app
+WORKDIR /app
+COPY requirements-base.txt ./
+RUN pip install --no-cache-dir docker==7.1.0
+COPY common/ ./common/
+COPY sandbox/ ./sandbox/
+COPY vm/ ./vm/
+# runs as root so it can reach the Docker socket; it accepts only the fixed
+# operations in sandbox.py and never runs attacker input itself.
+CMD ["python", "-m", "sandbox.sandbox"]

@@ -47,6 +47,33 @@ DISCOVERY_RE = re.compile(r"\b(uname|cat /proc/(cpuinfo|version|meminfo)|nproc|p
 MIRAI_RE = re.compile(r"/bin/busybox\s+[A-Z]{4,}|\b(ECCHI|MIRAI|SATORI|OKIRU|MASUTA|GAFGYT)\b|"
                       r"/bin/busybox\s+(ps|cat|echo|wget|tftp)|cat /proc/mounts", re.I)
 
+# ── v0.8 behavioural patterns (seen in the REAL restricted shell) ───────────
+# Each maps (regex over a session's commands) → (attack_type, severity, label).
+BEHAVIOURS = [
+    (re.compile(r"\bcrontab\b|/etc/cron|/etc/init\.d/|/etc/rc\.local|>>?\s*\S*rcS\b|"
+                r"\bupdate-rc\.d\b|/etc/rc\d?\.d/", re.I),
+     "PERSISTENCE", "HIGH", "boot/cron persistence"),
+    (re.compile(r"\b(pkill|kill(all)?)\s+(-9\s+)?(watchdog|dropbear|telnetd|lockd|sensor_daemon|sonia)\b|"
+                r">\s*/dev/watchdog|\bwatchdog\b.*\b(stop|disable)\b", re.I),
+     "DEFENSE_EVASION", "HIGH", "watchdog / security daemon kill"),
+    (re.compile(r"\bhistory\s+-c\b|>\s*/root/\.\w*history|\brm\s+-f?\s*/var/log|"
+                r"\biptables\s+-F\b|\bunset\s+HISTFILE", re.I),
+     "DEFENSE_EVASION", "MEDIUM", "log / history / firewall tampering"),
+    (re.compile(r":\(\)\s*\{\s*:\|\s*:&\s*\}\s*;?\s*:|\bwhile\s*:\s*;\s*do\b|"
+                r"\bdd\s+if=/dev/zero\b|\b(yes|cat)\s+/dev/urandom\b", re.I),
+     "DENIAL_OF_SERVICE", "HIGH", "fork bomb / resource exhaustion"),
+    (re.compile(r"\b(xmrig|minerd|cpuminer|cgminer|ccminer)\b|stratum\+tcp://|"
+                r"\b(pool\.minexmr|nanopool|supportxmr|coinhive)\b|--donate-level", re.I),
+     "CRYPTO_MINING", "HIGH", "crypto-miner deployment"),
+    (re.compile(r"\bnsenter\b|/proc/1/(root|ns)|\bchroot\s+/proc|\bunshare\b|/dev/mem\b|"
+                r"\binsmod\b|\bdocker(\.sock)?\b|/var/run/docker|cgroup.*release_agent|"
+                r"\bcapsh\b|/sys/kernel", re.I),
+     "CONTAINER_ESCAPE", "CRITICAL", "sandbox / container escape attempt"),
+    (re.compile(r"/dev/tcp/\d|\bnc\b[^\n]*\s-e\b|\bncat\b[^\n]*--exec|mkfifo\s+\S+;.*\|\s*(/bin/)?sh|"
+                r"python[0-9]?\s+-c\s+['\"].*socket|\bsh\s+-i\b.*>&|\bsocat\b.*exec", re.I),
+     "REVERSE_SHELL", "CRITICAL", "reverse-shell / bind-shell attempt"),
+]
+
 
 def _det(ip, attack_type, severity, details, protocol=None, device=None, session_id=None):
     return dict(ip=ip, attack_type=attack_type, severity=severity, details=details,
@@ -215,6 +242,48 @@ def mirai_and_post_exploitation():
     return out
 
 
+def behavioural():
+    """Post-exploitation behaviour visible in the real restricted shell: persistence,
+    defence evasion, DoS, crypto-mining, container escape, reverse shells."""
+    out = []
+    rows = fetchall("""
+        SELECT session_id, ip, protocol, device, string_agg(command, ' ; ' ORDER BY ts)
+        FROM events WHERE event_type='command' AND command IS NOT NULL
+          AND ts > NOW() - INTERVAL '15 minutes'
+        GROUP BY session_id, ip, protocol, device
+    """)
+    for sid, ip, proto, dev, joined in rows:
+        joined = joined or ""
+        for rx, atype, sev, label in BEHAVIOURS:
+            if rx.search(joined):
+                m = rx.search(joined)
+                snippet = joined[max(0, m.start() - 10):m.start() + 120]
+                out.append(_det(ip, atype, sev, f"{label}: …{snippet.strip()}…", proto, dev, sid))
+    return out
+
+
+def modbus_ics():
+    """Modbus/TCP ICS activity: register writes (parameter tampering) and scanning."""
+    out = []
+    rows = fetchall("""
+        SELECT ip, device, session_id,
+               COUNT(*) FILTER (WHERE event_type='modbus_write'),
+               COUNT(*) FILTER (WHERE event_type='modbus_request'),
+               string_agg(DISTINCT payload, '; ') FILTER (WHERE event_type='modbus_write')
+        FROM events WHERE protocol='Modbus' AND ts > NOW() - INTERVAL '15 minutes'
+        GROUP BY ip, device, session_id
+    """)
+    for ip, dev, sid, writes, reads, wpayload in rows:
+        if writes:
+            out.append(_det(ip, "ICS_PARAMETER_TAMPERING", "CRITICAL",
+                            f"{writes} Modbus register write(s): {(wpayload or '')[:160]}",
+                            "Modbus", dev, sid))
+        if reads >= 10 and not writes:
+            out.append(_det(ip, "ICS_DEVICE_SCAN", "MEDIUM",
+                            f"{reads} Modbus reads (register/coil enumeration)", "Modbus", dev, sid))
+    return out
+
+
 def mqtt_and_ics():
     out = []
     rows = fetchall(f"""
@@ -226,6 +295,9 @@ def mqtt_and_ics():
         GROUP BY ip
     """)
     for ip, foreign_pub, wildcard_sub, pubs, topics in rows:
+        if pubs >= int(os.environ.get("MQTT_FLOOD_THRESHOLD", 50)):
+            out.append(_det(ip, "MQTT_FLOOD", "HIGH",
+                            f"MQTT publish flood: {pubs} messages in 10 min", "MQTT"))
         if foreign_pub >= 3 or (wildcard_sub and pubs >= 5):
             out.append(_det(ip, "BOTNET_C2", "HIGH",
                             f"Broker abused as C2 channel: {pubs} publishes ({foreign_pub} to non-device topics), "
@@ -298,8 +370,8 @@ def multi_protocol():
 
 
 ALL_RULES = [brute_force, credential_compromise, credential_stuffing, reconnaissance,
-             malware_delivery, malware_family, mirai_and_post_exploitation, mqtt_and_ics, protocol_exploit,
-             stream_access, multi_protocol]
+             malware_delivery, malware_family, mirai_and_post_exploitation, behavioural, modbus_ics,
+             mqtt_and_ics, protocol_exploit, stream_access, multi_protocol]
 
 
 def run_rules():

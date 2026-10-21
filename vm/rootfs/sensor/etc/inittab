@@ -1,0 +1,5 @@
+::sysinit:/bin/true
+::respawn:/usr/sbin/telnetd -F -l /bin/login
+::respawn:/usr/bin/sensor_daemon -c /etc/sensor.conf
+::respawn:/usr/bin/modbusd -p 502
+::respawn:/usr/bin/mqtt_pub -i 5

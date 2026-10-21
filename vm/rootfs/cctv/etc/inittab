@@ -1,0 +1,4 @@
+::sysinit:/bin/true
+::respawn:/usr/sbin/boa -c /etc/boa
+::respawn:/usr/bin/sonia
+::respawn:/usr/bin/dvrhelper

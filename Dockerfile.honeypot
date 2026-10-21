@@ -1,4 +1,4 @@
-# HoneyBot-IoT — image for the five protocol honeypots + the device-state service
+# HoneyBot-IoT — image for the per-device machines (protocol front-ends) + device-state
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # same uid as the API/intel image: quarantined samples are written 0400 and must
@@ -13,5 +13,7 @@ COPY telnet_honeypot/ ./telnet_honeypot/
 COPY http_honeypot/ ./http_honeypot/
 COPY mqtt_honeypot/ ./mqtt_honeypot/
 COPY rtsp_honeypot/ ./rtsp_honeypot/
+COPY modbus_honeypot/ ./modbus_honeypot/
 COPY device_state/ ./device_state/
+COPY device_machine.py ./
 USER honey

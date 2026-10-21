@@ -1,19 +1,30 @@
 # ═══════════════════════════════════════════════════════════════════════════
-#  HoneyBot-IoT  —  full stack (v0.7 · 70% milestone)
+#  HoneyBot-IoT  —  full stack (v0.8 · device machines + real restricted shell)
 #  COMSATS University Islamabad  |  SP23-BCT-001 / SP23-BCT-003
 #
+#  Each emulated IoT device is its OWN machine (container) on the honeynet, with
+#  its own hostname / IP / MAC, serving exactly that device's protocols:
+#
+#    cctv-machine       RTSP :554 · HTTP/HTTPS :8080/:8443        (Boa IP camera)
+#    smartlock-machine  SSH :2222 · MQTT :1883 · HTTP :8081       (SecureHome hub)
+#    sensor-machine     Telnet :2323 · Modbus :502 · HTTP :8082   (ISN-4000 node)
+#
+#  On a successful SSH/Telnet login the attacker gets a REAL but heavily
+#  restricted BusyBox shell: the `sandbox` service starts a throw-away device
+#  machine (vm/Dockerfile) with no network, read-only root, tmpfs, and CPU /
+#  memory / process / time limits, and destroys it at logout. Set SHELL_MODE=fake
+#  to use the in-process emulated shell instead.
+#
 #  Networks
-#    honeynet : internet-facing honeypots (published ports). Every connection a
-#               honeypot ORIGINATES is dropped by the `firewall` service
-#               (scope: inbound-only); honeypots start only once it is active.
-#    backnet  : internal only (internal: true) — DB, Redis, API, intel, backup.
-#    frontnet : Nginx only — publishes the dashboard on :80 (an internal network
-#               cannot publish ports, which broke the v0.6 dashboard).
+#    honeynet : internet-facing device machines (published ports). Every
+#               connection a machine ORIGINATES is dropped by the `firewall`.
+#    backnet  : internal only — DB, Redis, API, intel, sandbox, backup.
+#    frontnet : Nginx only — publishes the dashboard on :80.
 #    egress   : intel engine only — Telegram / SMTP alerts and reports.
 #
 #  Quick start:   cp .env.example .env   (edit it)   &&   docker compose up -d --build
 #  Dashboard:     http://localhost/   (login printed by: docker compose logs auth-init)
-#  Monitoring:    docker compose --profile monitoring up -d   (Grafana :3000, Prometheus :9090)
+#  Monitoring:    docker compose --profile monitoring up -d
 #  Simulator:     docker compose --profile sim up --build attacker
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -40,36 +51,43 @@ networks:
 
 volumes:
   pgdata:
-  honey_data:    # per-honeypot writable data (SSH host key, TLS certificate)
+  honey_data:    # per-machine writable data (SSH host key, TLS certificate)
   captures:      # QUARANTINE: captured malware samples (mode 0400, never executed)
   nginx_auth:    # bcrypt dashboard credentials written by auth-init
   prometheus_data:
   grafana_data:
+  vm_ipc:        # per-session device-control FIFOs shared with the sandbox machines
+    name: honeybot_vm_ipc
 
-x-honeypot: &honeypot
+# ── a device machine: runs one device's protocol front-ends (device_machine.py) ──
+x-machine: &machine
   build: { context: ., dockerfile: Dockerfile.honeypot }
-  image: honeybot/honeypot:0.7
+  image: honeybot/honeypot:0.8
   restart: unless-stopped
   env_file: .env
+  entrypoint: ["python", "device_machine.py"]
   environment:
     CAPTURE_DIR: /app/captures
+    SANDBOX_HOST: sandbox
+    SANDBOX_IPC_DIR: /run/vm-ipc
   networks: [honeynet, backnet]
   depends_on:
     db: { condition: service_healthy }
     redis: { condition: service_started }
     firewall: { condition: service_healthy }
+    sandbox: { condition: service_healthy }
   security_opt: ["no-new-privileges:true"]
   cap_drop: ["ALL"]
   read_only: true
   tmpfs: ["/tmp"]
-  volumes: ["honey_data:/app/data", "captures:/app/captures"]
+  volumes: ["honey_data:/app/data", "captures:/app/captures", "vm_ipc:/run/vm-ipc"]
   deploy:
     resources:
-      limits: { cpus: "0.75", memory: 256M }
+      limits: { cpus: "1.0", memory: 384M }
 
 x-backend: &backend
   build: { context: ., dockerfile: Dockerfile.api }
-  image: honeybot/api:0.7
+  image: honeybot/api:0.8
   restart: unless-stopped
   env_file: .env
   environment:
@@ -102,7 +120,6 @@ services:
     image: redis:7.2-alpine
     container_name: honeybot_redis
     restart: unless-stopped
-    # internal network only; protected-mode off so the other containers may connect
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb",
               "--maxmemory-policy", "allkeys-lru", "--protected-mode", "no"]
     networks: [backnet]
@@ -110,7 +127,7 @@ services:
   # ── outbound isolation (host firewall, fail-closed) ───────────────────────
   firewall:
     build: { context: ., dockerfile: Dockerfile.firewall }
-    image: honeybot/firewall:0.7
+    image: honeybot/firewall:0.8
     container_name: honeybot_firewall
     restart: unless-stopped
     network_mode: host
@@ -127,43 +144,77 @@ services:
       retries: 6
       start_period: 5s
 
+  # ── sandbox: throw-away device machines for the real restricted shell ─────
+  #   The ONLY service that talks to the Docker daemon. It builds the per-device
+  #   machine images (vm/) on first start and creates one locked-down, network-
+  #   less container per attacker session.
+  sandbox:
+    build: { context: ., dockerfile: Dockerfile.sandbox }
+    image: honeybot/sandbox:0.8
+    container_name: honeybot_sandbox
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SANDBOX_IPC_VOLUME: honeybot_vm_ipc
+      SANDBOX_IPC_HOSTDIR: /srv/vm-ipc
+      VM_BUILD_CONTEXT: /app/vm
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - vm_ipc:/srv/vm-ipc          # root pre-creates each session's 0777 FIFO dir here
+    networks: [backnet]
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import socket; socket.create_connection(('127.0.0.1',7070),timeout=3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
   # ── device state manager (shared emulated-device state) ───────────────────
   device_state:
-    <<: *honeypot
+    <<: *machine
     container_name: honeybot_state
-    command: ["python", "device_state/device_state.py"]
+    entrypoint: ["python", "device_state/device_state.py"]
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
     networks: [backnet]            # no attacker traffic, internal only
 
-  # ── honeypots (5 protocols, 3 devices) ────────────────────────────────────
-  ssh_honeypot:
-    <<: *honeypot
-    container_name: honeybot_ssh
-    command: ["python", "ssh_honeypot/ssh_honeypot.py"]
-    ports: ["2222:2222"]
+  # ── device machines (one container per device, its protocols only) ────────
+  cctv-machine:
+    <<: *machine
+    container_name: honeybot_cctv
+    hostname: IPC-HFW2431S
+    environment:
+      DEVICE: cctv
+      CAPTURE_DIR: /app/captures
+      SANDBOX_HOST: sandbox
+      SANDBOX_IPC_DIR: /run/vm-ipc
+      RTSP_PORT: 8554
+    ports: ["8080:8080", "8443:8443", "554:8554"]
 
-  telnet_honeypot:
-    <<: *honeypot
-    container_name: honeybot_telnet
-    command: ["python", "telnet_honeypot/telnet_honeypot.py"]
-    ports: ["2323:2323"]
+  smartlock-machine:
+    <<: *machine
+    container_name: honeybot_smartlock
+    hostname: smartlock
+    environment:
+      DEVICE: smartlock
+      CAPTURE_DIR: /app/captures
+      SANDBOX_HOST: sandbox
+      SANDBOX_IPC_DIR: /run/vm-ipc
+    ports: ["2222:2222", "1883:1883", "8081:8081"]
 
-  http_honeypot:
-    <<: *honeypot
-    container_name: honeybot_http
-    command: ["python", "http_honeypot/http_honeypot.py"]
-    ports: ["8080:8080", "8443:8443", "8081:8081", "8082:8082"]
-
-  mqtt_honeypot:
-    <<: *honeypot
-    container_name: honeybot_mqtt
-    command: ["python", "mqtt_honeypot/mqtt_honeypot.py"]
-    ports: ["1883:1883"]
-
-  rtsp_honeypot:
-    <<: *honeypot
-    container_name: honeybot_rtsp
-    command: ["python", "rtsp_honeypot/rtsp_honeypot.py"]
-    ports: ["554:8554"]           # published on the standard RTSP port
+  sensor-machine:
+    <<: *machine
+    container_name: honeybot_sensor
+    hostname: sensor-node
+    environment:
+      DEVICE: sensor
+      CAPTURE_DIR: /app/captures
+      SANDBOX_HOST: sandbox
+      SANDBOX_IPC_DIR: /run/vm-ipc
+      MODBUS_PORT: 1502             # unprivileged inside the container (cap_drop ALL)
+    ports: ["2323:2323", "502:1502", "8082:8082"]
 
   # ── API (REST + WebSocket) and threat-intelligence engine ─────────────────
   api:
@@ -199,7 +250,7 @@ services:
 
   nginx:
     build: { context: ., dockerfile: Dockerfile.dashboard }
-    image: honeybot/dashboard:0.7
+    image: honeybot/dashboard:0.8
     container_name: honeybot_nginx
     restart: unless-stopped
     ports: ["${DASHBOARD_PORT:-80}:80"]
@@ -274,9 +325,11 @@ services:
   # ── attack simulator (lab testing only; `--profile sim`) ──────────────────
   attacker:
     build: { context: ., dockerfile: Dockerfile.attacker }
-    image: honeybot/attacker:0.7
+    image: honeybot/attacker:0.8
     profiles: ["sim"]
     networks: [honeynet]
-    command: ["--confirm-own-honeypot", "--host", "ssh_honeypot", "--http-host", "http_honeypot",
-              "--mqtt-host", "mqtt_honeypot", "--telnet-host", "telnet_honeypot",
-              "--rtsp-host", "rtsp_honeypot"]
+    command: ["--confirm-own-honeypot",
+              "--host", "smartlock-machine", "--telnet-host", "sensor-machine",
+              "--mqtt-host", "smartlock-machine", "--rtsp-host", "cctv-machine",
+              "--http-host", "cctv-machine", "--lock-host", "smartlock-machine",
+              "--sensor-host", "sensor-machine", "--modbus-host", "sensor-machine"]

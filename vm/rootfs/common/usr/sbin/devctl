@@ -1,0 +1,10 @@
+#!/bin/sh
+# devctl — client for the on-board device daemon (lockd / sensor_daemon / ipcam).
+# The daemon end of /run/devctl is served by HoneyBot and drives the shared
+# device state, so a change made here is seen on every other protocol.
+if [ ! -p /run/devctl/req ]; then
+  echo "devctl: cannot connect to device daemon: No such file or directory" >&2
+  exit 1
+fi
+echo "$*" > /run/devctl/req
+cat /run/devctl/resp

@@ -9,6 +9,7 @@ HoneyBot-IoT — Telnet honeypot  (device: Industrial Sensor, port 2323)
 
 import os
 import sys
+import socket
 import asyncio
 import logging
 
@@ -18,6 +19,7 @@ from common.db import Session
 from common.fakeshell import FakeShell
 from common.state import STATE, start_heartbeat
 from common.creds import is_weak
+from common import realshell
 
 PORT = int(os.environ.get("TELNET_PORT", 2323))
 DEVICE = "sensor"
@@ -109,6 +111,92 @@ class TelnetIO:
         await self.w.drain()
 
 
+def _strip_iac(data, carry):
+    """Remove Telnet IAC command sequences from a raw byte chunk, returning the data
+    bytes to forward to the shell. `carry` is a bytearray holding an IAC sequence split
+    across reads. Attacker→server negotiation is otherwise ignored here."""
+    out = bytearray()
+    buf = bytes(carry) + data
+    carry.clear()
+    i, n = 0, len(buf)
+    while i < n:
+        b = buf[i]
+        if b == IAC:
+            if i + 1 >= n:
+                carry.append(IAC)
+                break
+            cmd = buf[i + 1]
+            if cmd == IAC:
+                out.append(IAC)
+                i += 2
+                continue
+            if cmd == SB:
+                end = buf.find(bytes([IAC, SE]), i)
+                if end == -1:
+                    carry.extend(buf[i:])
+                    break
+                i = end + 2
+                continue
+            if cmd in (DO, DONT, WILL, WONT):
+                if i + 2 >= n:
+                    carry.extend(buf[i:])
+                    break
+                i += 3
+                continue
+            i += 2
+            continue
+        out.append(b)
+        i += 1
+    return bytes(out)
+
+
+async def _telnet_real_shell(io, session, user):
+    """Attach the Telnet client to a throw-away device machine (real restricted shell)."""
+    loop = asyncio.get_event_loop()
+    rs = realshell.RealShellSession(session, DEVICE, "root" if user != "operator" else "admin")
+    rs.open(tty=True, cols=80, rows=24, term="vt100")
+    sock = rs.sock
+    carry = bytearray()
+
+    async def client_to_shell():
+        try:
+            while True:
+                data = await asyncio.wait_for(io.r.read(4096), timeout=rs_timeout)
+                if not data:
+                    break
+                payload = _strip_iac(data, carry)
+                if payload:
+                    if rs.recorder is not None:
+                        rs.recorder.feed(payload)            # reconstruct command lines
+                    await loop.run_in_executor(None, sock.sendall, payload)
+        except (asyncio.TimeoutError, ConnectionError, OSError):
+            pass
+        finally:
+            try:
+                sock.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+
+    async def shell_to_client():
+        try:
+            while True:
+                data = await loop.run_in_executor(None, sock.recv, 65536)
+                if not data:
+                    break
+                io.w.write(data)
+                await io.w.drain()
+        except (ConnectionError, OSError):
+            pass
+
+    try:
+        await asyncio.gather(client_to_shell(), shell_to_client())
+    finally:
+        await loop.run_in_executor(None, rs.close)
+
+
+rs_timeout = int(os.environ.get("SANDBOX_TIMEOUT", 900))
+
+
 async def handle(reader, writer):
     peer = writer.get_extra_info("peername") or ("unknown", 0)
     ip, sport = peer[0], peer[1]
@@ -136,6 +224,12 @@ async def handle(reader, writer):
             session.event("telnet_negotiation", payload=",".join(io.negotiation[:40]))
         if not user:
             return
+        if realshell.enabled_for(DEVICE):
+            try:
+                await _telnet_real_shell(io, session, user)
+                return
+            except realshell.SandboxUnavailable as e:
+                log.warning("sandbox unavailable, using fake shell: %s", e)
         shell = FakeShell(DEVICE, session=session, user="root" if user != "operator" else "operator")
         await io.send(f"\r\nBusyBox v1.24.1 (2020-08-17 09:10:02 UTC) built-in shell (ash)\r\n"
                       "Enter 'help' for a list of built-in commands.\r\n\r\n")

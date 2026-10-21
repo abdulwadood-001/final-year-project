@@ -54,12 +54,12 @@ PROTOCOLS = ["SSH", "Telnet", "HTTP", "MQTT", "RTSP"]
 ACTIVITY = ("auth", "command", "http_request", "mqtt_publish", "mqtt_subscribe", "rtsp_request",
             "download_attempt", "state_change", "malformed", "file_write", "file_upload", "file_capture",
             "exec_attempt", "stream_access")
-SERVICES = ("ssh", "telnet", "http", "mqtt", "rtsp", "device_state", "intel")
+SERVICES = ("ssh", "telnet", "http", "mqtt", "rtsp", "modbus", "device_state", "intel")
 DEVICES = {
     "cctv": {"name": "CCTV Camera", "protocols": ["RTSP", "HTTP"], "services": ["rtsp", "http"]},
     "smartlock": {"name": "Smart Lock", "protocols": ["SSH", "HTTP", "MQTT"], "services": ["ssh", "http", "mqtt"]},
-    "sensor": {"name": "Industrial Sensor", "protocols": ["Telnet", "MQTT", "HTTP"],
-               "services": ["telnet", "mqtt", "http"]},
+    "sensor": {"name": "Industrial Sensor", "protocols": ["Telnet", "Modbus", "MQTT", "HTTP"],
+               "services": ["telnet", "modbus", "mqtt", "http"]},
 }
 SECRET_FIELDS = ("api_token",)
 

@@ -1,0 +1,10 @@
+#!/bin/sh
+# sensorctl — ISN-4000 sensor daemon control
+case "$1" in
+  help|-h|--help) echo "usage: sensorctl [status|set <key> <value>]"
+                  echo "keys: temp_threshold pressure_threshold interval mode alarm" ;;
+  ""|status) exec devctl sensorctl status ;;
+  set) [ $# -ge 3 ] || { echo "usage: sensorctl set <key> <value>" >&2; exit 1; }
+       exec devctl sensorctl set "$2" "$3" ;;
+  *) echo "sensorctl: unknown command '$1'" >&2; exit 1 ;;
+esac
