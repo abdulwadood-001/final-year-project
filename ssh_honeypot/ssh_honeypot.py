@@ -9,6 +9,7 @@ HoneyBot-IoT — SSH honeypot  (device: Smart Lock, port 2222)
 """
 
 import os
+import re
 import sys
 import time
 import socket
@@ -23,6 +24,7 @@ from common.db import Session
 from common.fakeshell import FakeShell
 from common.state import STATE, start_heartbeat
 from common.creds import is_weak
+from common import capture
 
 PORT = int(os.environ.get("SSH_PORT", 2222))
 DEVICE = "smartlock"
@@ -148,11 +150,99 @@ def interactive(chan, shell, session):
             last = ch
 
 
+# exec commands that receive a file on stdin – how bots push binaries over SSH
+STDIN_SINK_RE = re.compile(r"(?:^|[;&|]\s*)(?:sh\s+-c\s+['\"])?\s*(?:cat\s*>{1,2}\s*|dd\s+(?:[^;|&]*\s)?of=|tee\s+(?:-a\s+)?)"
+                           r"([^\s;|&'\"]+)")
+SCP_SINK_RE = re.compile(r"^\s*scp\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*t[a-zA-Z]*\s+(?:-[a-zA-Z]+\s+)*(\S+)")
+STDIN_TIMEOUT = 20
+
+
+def read_stdin(chan, limit=capture.MAX_SAMPLE):
+    """Read the exec channel's stdin until EOF, a size cap, or a timeout."""
+    chan.settimeout(STDIN_TIMEOUT)
+    buf = bytearray()
+    try:
+        while len(buf) < limit:
+            chunk = chan.recv(65536)
+            if not chunk:
+                break
+            buf.extend(chunk)
+    except socket.timeout:
+        pass
+    return bytes(buf[:limit])
+
+
+def scp_sink(chan, shell, session, target):
+    """Minimal `scp -t` receiver: accept every file the client pushes and capture it."""
+    chan.settimeout(STDIN_TIMEOUT)
+    files = 0
+
+    def readline():
+        line = bytearray()
+        while not line.endswith(b"\n") and len(line) < 4096:
+            c = chan.recv(1)
+            if not c:
+                raise EOFError
+            line.extend(c)
+        return line.decode("utf-8", "replace").rstrip("\n")
+
+    try:
+        chan.sendall(b"\0")
+        while True:
+            hdr = readline()
+            if not hdr:
+                break
+            kind = hdr[0]
+            if kind in "TDE":                 # times / directory push / end of directory
+                chan.sendall(b"\0")
+                continue
+            if kind != "C":
+                break
+            _mode, size, name = (hdr[1:].split(" ", 2) + ["", ""])[:3]
+            size = min(int(size), capture.MAX_SAMPLE) if size.isdigit() else 0
+            chan.sendall(b"\0")
+            data = bytearray()
+            while len(data) < size:
+                chunk = chan.recv(min(65536, size - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+            chan.recv(1)                      # trailing \0 after the file body
+            # `scp x host:/tmp/` or `host:/tmp` → directory target; `host:/tmp/x` → file target
+            is_dir = target.endswith("/") or target in (".", "~") or shell._abs(target) in shell.dirs
+            dest = f"{target.rstrip('/') or '/'}/{name}" if is_dir else target
+            path = shell.put_file(dest, bytes(data))
+            capture.store(session, bytes(data), "ssh_stdin", filename=path)
+            session.event("file_upload", payload=f"scp {name} -> {path} ({len(data)} bytes)",
+                          path=path, size=len(data), via="scp")
+            files += 1
+            chan.sendall(b"\0")
+    except (EOFError, socket.timeout, OSError):
+        pass
+    return files
+
+
 def serve_channel(chan, meta, session):
     shell = FakeShell(DEVICE, session=session, user=session.username or "root")
     try:
-        if meta["exec"] is not None:
-            out, _ = shell.run(meta["exec"])
+        cmd = meta["exec"]
+        scp = SCP_SINK_RE.match(cmd) if cmd else None
+        sink = STDIN_SINK_RE.search(cmd) if cmd and not scp else None
+        if scp:
+            session.command(cmd, output="")
+            scp_sink(chan, shell, session, scp.group(1))
+            chan.send_exit_status(0)
+        elif sink and "<" not in cmd.split(sink.group(0))[0]:
+            data = read_stdin(chan)
+            session.command(cmd, output="")
+            if data:
+                path = shell.put_file(sink.group(1), data)
+                capture.store(session, data, "ssh_stdin", filename=path)
+                session.event("file_upload", payload=f"stdin -> {path} ({len(data)} bytes)",
+                              path=path, size=len(data), via="exec-stdin")
+            chan.send_exit_status(0)
+        elif cmd is not None:
+            out, _ = shell.run(cmd)
             if out:
                 chan.sendall(out.replace("\n", "\r\n").encode("utf-8", "replace") + b"\r\n")
             chan.send_exit_status(0)
@@ -166,6 +256,7 @@ def serve_channel(chan, meta, session):
     except Exception as e:
         log.debug("channel error: %s", e)
     finally:
+        shell.finalize()
         try:
             chan.close()
         except Exception:
@@ -214,6 +305,11 @@ def handle(sock, addr):
             _conn_count[ip] -= 1
         if transport:
             transport.close()
+        else:                       # rate-limited / failed before the transport existed
+            try:
+                sock.close()
+            except Exception:
+                pass
 
 
 HOST_KEY = None

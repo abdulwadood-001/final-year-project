@@ -3,9 +3,12 @@ nginx/.htpasswd
 geoip/*.mmdb
 captures/
 pcap/
+backups/*
+!backups/.gitkeep
 __pycache__/
 *.pyc
 *.log
 data/
 .pytest_cache/
-dump.rdb
+dashboard/node_modules/
+dashboard/dist/

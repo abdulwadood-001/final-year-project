@@ -1,8 +1,10 @@
-# HoneyBot-IoT — ML Model Card (stub for the 100% milestone)
+# HoneyBot-IoT — ML Model Card (data ready at 70%, models at 100%)
 
-> The AI/ML module (scope Module 8) is **not implemented at 60%** — this card documents the
-> plan and will be filled with real numbers at 100%. It is included now so the data pipeline
-> that feeds it can be reviewed early.
+> **Status at 70% (v0.7):** WBS 10.1 *data preparation & feature engineering* is done:
+> `ml/features.py` builds the labelled per-session dataset live from the event store
+> (`GET /api/ml/dataset.csv`, the Reports page, or `python -m ml.features out.csv`). Model
+> training, evaluation and serving (WBS 10.2–10.6) are the 100% milestone; the metrics table
+> below is filled in then.
 
 ## Intended use
 

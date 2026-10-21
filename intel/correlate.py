@@ -108,35 +108,66 @@ def update_campaigns(min_pairs=5, threshold=0.6):
         execute("UPDATE attackers SET campaign_id=%s WHERE ip = ANY(%s)", (cid, members))
 
 
-def _upsert_ioc(typ, value, ip, sid, proto, context):
+def _upsert_ioc(typ, value, ip, sid, proto, context, source, source_id, seen_at=None):
+    """Record one sighting of an IOC.
+
+    `hits` counts DISTINCT sightings (one per source event / detection / capture).
+    v0.6 did `hits+1` on every 30-s pass over the last 10 min of events, inflating
+    the counter ~20x. The sighting row is inserted with ON CONFLICT DO NOTHING, and
+    the IOC counter only grows when that insert actually created a row.
+    """
+    value = (value or "")[:1000]
+    if not value:
+        return
     execute("""
-        INSERT INTO iocs (type, value, source_ip, session_id, protocol, context)
-        VALUES (%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (type, value) DO UPDATE SET last_seen=NOW(), hits=iocs.hits+1
-    """, (typ, value[:1000], ip, sid, proto, context[:300] if context else None))
+        WITH s AS (
+            INSERT INTO ioc_sightings (source, source_id, type, value, seen_at)
+            VALUES (%s, %s, %s, %s, COALESCE(%s, NOW()))
+            ON CONFLICT DO NOTHING
+            RETURNING 1
+        )
+        INSERT INTO iocs (type, value, source_ip, session_id, protocol, context, first_seen, last_seen, hits)
+        SELECT %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), COALESCE(%s, NOW()), 1
+        WHERE EXISTS (SELECT 1 FROM s)
+        ON CONFLICT (type, value) DO UPDATE
+           SET hits = iocs.hits + 1,
+               last_seen = GREATEST(iocs.last_seen, EXCLUDED.last_seen),
+               first_seen = LEAST(iocs.first_seen, EXCLUDED.first_seen)
+    """, (source, source_id, typ, value, seen_at,
+          typ, value, ip, sid, proto, context[:300] if context else None, seen_at, seen_at))
 
 
 def extract_iocs():
+    # events are re-scanned over a sliding window so rows committed late by a
+    # honeypot writer are never missed; sightings make the re-scan idempotent
     rows = fetchall("""
-        SELECT e.ip, e.session_id, e.protocol, e.event_type, e.payload, e.raw->>'sha256', e.command
+        SELECT e.id, e.ts, e.ip, e.session_id, e.protocol, e.event_type, e.payload,
+               e.raw->>'sha256', e.command
         FROM events e
         WHERE e.event_type IN ('download_attempt','file_write','file_upload')
-          AND e.ts > NOW() - INTERVAL '10 minutes'
+          AND e.ts > NOW() - INTERVAL '30 minutes'
     """)
-    for ip, sid, proto, et, payload, sha, cmd in rows:
+    for eid, ts, ip, sid, proto, et, payload, sha, cmd in rows:
         if et == "download_attempt" and payload:
-            _upsert_ioc("url", payload, ip, sid, proto, cmd or "")
+            _upsert_ioc("url", payload, ip, sid, proto, cmd or "", "event", eid, ts)
             host = urlparse(payload).hostname or ""
             if host:
                 _upsert_ioc("ipv4" if IP_RE.match(host) else "domain", host, ip, sid, proto,
-                            f"payload host for {payload}")
+                            f"payload host for {payload}", "event", eid, ts)
         elif sha and et in ("file_write", "file_upload"):
-            _upsert_ioc("sha256", sha, ip, sid, proto, f"{et}: {(payload or '')[:80]}")
-    # attacker IPs with HIGH/CRITICAL activity become IOCs too
-    for (ip,) in fetchall("""SELECT DISTINCT ip FROM detections
-                             WHERE severity IN ('HIGH','CRITICAL') AND timestamp > NOW() - INTERVAL '10 minutes'"""):
+            _upsert_ioc("sha256", sha, ip, sid, proto, f"{et}: {(payload or '')[:80]}", "event", eid, ts)
+    # every stored malware sample is an IOC (with its YARA verdict as context)
+    for cid, ts, ip, sid, proto, sha, fname, verdict in fetchall("""
+            SELECT id, ts, ip, session_id, protocol, sha256, filename, yara_result FROM file_captures
+            WHERE ts > NOW() - INTERVAL '30 minutes'"""):
+        _upsert_ioc("sha256", sha, ip, sid, proto,
+                    f"captured sample {fname or ''} [{verdict or 'not scanned'}]".strip(), "capture", cid, ts)
+    # attacker IPs with HIGH/CRITICAL activity become IOCs too (one sighting per detection)
+    for did, ts, ip in fetchall("""SELECT id, timestamp, ip FROM detections
+                                   WHERE severity IN ('HIGH','CRITICAL')
+                                     AND timestamp > NOW() - INTERVAL '30 minutes'"""):
         if not geo.is_private(ip) or geo.DEMO:
-            _upsert_ioc("ipv4", ip, ip, None, None, "attacker source address")
+            _upsert_ioc("ipv4", ip, ip, None, None, "attacker source address", "detection", did, ts)
 
 
 def run():

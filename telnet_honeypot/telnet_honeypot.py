@@ -36,6 +36,7 @@ class TelnetIO:
     def __init__(self, reader, writer):
         self.r, self.w = reader, writer
         self.buf = bytearray()
+        self.carry = bytearray()
         self.negotiation = []
 
     async def negotiate(self):
@@ -46,6 +47,17 @@ class TelnetIO:
         data = await asyncio.wait_for(self.r.read(1024), timeout=IDLE_TIMEOUT)
         if not data:
             raise ConnectionError("eof")
+        # an IAC command can be split across two TCP reads – keep the tail for next time
+        data = bytes(self.carry) + data
+        self.carry = bytearray()
+        tail = 0
+        if data[-1:] == bytes([IAC]) and not data.endswith(bytes([IAC, IAC])):
+            tail = 1
+        elif len(data) >= 2 and data[-2] == IAC and data[-1] in (DO, DONT, WILL, WONT, SB):
+            tail = 2
+        if tail:
+            self.carry = bytearray(data[-tail:])
+            data = data[:-tail]
         i = 0
         while i < len(data):
             b = data[i]
@@ -102,6 +114,7 @@ async def handle(reader, writer):
     ip, sport = peer[0], peer[1]
     session = Session("Telnet", DEVICE, ip, sport, PORT)
     io = TelnetIO(reader, writer)
+    shell = None
     try:
         await io.negotiate()
         await io.send(BANNER)
@@ -141,6 +154,8 @@ async def handle(reader, writer):
     except Exception as e:
         log.debug("error %s: %s", ip, e)
     finally:
+        if shell is not None:
+            shell.finalize()          # capture any files the attacker dropped
         session.close()
         try:
             writer.close()

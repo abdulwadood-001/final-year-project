@@ -20,6 +20,7 @@ import posixpath
 from datetime import datetime, timezone
 
 from common.state import STATE
+from common import capture
 
 URL_RE = re.compile(r"""((?:https?|ftp|tftp)://[^\s'";|&<>`)]+)""", re.I)
 HOST_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
@@ -84,6 +85,10 @@ class FakeShell:
         self.env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": self.home,
                     "USER": user, "SHELL": "/bin/sh"}
         self.dirs, self.files, self.dynamic = set(), {}, {}
+        self._execs = set()             # paths the attacker made executable (chmod +x)
+        self._line = ""                 # command line currently being executed
+        self._urls_logged = set()       # URLs already logged for the current line
+        self._dirty = set()             # files the attacker wrote (candidates for capture)
         self._build_fs()
 
     # ── filesystem ─────────────────────────────────────────────────────────
@@ -193,6 +198,25 @@ class FakeShell:
         if self.session is not None:
             self.session.event(event_type, **kw)
 
+    @staticmethod
+    def normalize_url(target, scheme="http"):
+        """`198.51.100.23/bins/arm7` → `http://198.51.100.23/bins/arm7` (bots often omit
+        the scheme; BusyBox wget/curl default to http)."""
+        target = target.strip("'\"")
+        if re.match(r"^[a-z][a-z0-9+.-]*://", target, re.I):
+            return target
+        return f"{scheme}://{target}"
+
+    def _log_download(self, url, tool=None):
+        """One `download_attempt` event per distinct URL per command line. The URL is
+        recorded as an IOC by the intel engine; it is NEVER fetched."""
+        url = url.rstrip(".,;")
+        if url in self._urls_logged:
+            return
+        self._urls_logged.add(url)
+        self._log("download_attempt", payload=url, url=url, command=self._line[:500],
+                  tool=tool)
+
     # ── main entry ─────────────────────────────────────────────────────────
     def run(self, line):
         """Execute one input line.  Returns (output, should_exit)."""
@@ -200,8 +224,9 @@ class FakeShell:
         if not line:
             return "", False
         self.history.append(line)
+        self._line, self._urls_logged = line, set()
         for url in URL_RE.findall(line):
-            self._log("download_attempt", payload=url, url=url, command=line[:500])
+            self._log_download(url)
         out, exit_ = [], False
         last_ok = True
         for op, segment in self._split_chain(line):
@@ -324,9 +349,40 @@ class FakeShell:
             return
         new = (self.files.get(p, "") if append else "") + content
         self.files[p] = new
+        self._dirty.add(p)
         data = new.encode("latin-1", "replace")
         self._log("file_write", payload=new[:2000], path=p, size=len(data),
                   sha256=hashlib.sha256(data).hexdigest(), append=append)
+
+    # ── malware capture ────────────────────────────────────────────────────
+    def capture_file(self, path, source="shell_write"):
+        """Quarantine an attacker-written file (see common/capture.py)."""
+        if path not in self._dirty:
+            return None
+        content = self.files.get(path)
+        if content is None:
+            return None
+        data = content.encode("latin-1", "replace")
+        if not (capture.looks_interesting(data) or (path in self._execs and len(data) >= capture.MIN_SAMPLE)):
+            return None
+        self._dirty.discard(path)
+        return capture.store(self.session, data, source, filename=path)
+
+    def finalize(self):
+        """Called by SSH/Telnet when the shell ends: capture every remaining dropped file."""
+        for p in list(self._dirty):
+            try:
+                self.capture_file(p)
+            except Exception:
+                pass
+
+    def put_file(self, path, data: bytes):
+        """A file delivered out-of-band (SSH stdin / scp) – add it to the fake FS."""
+        p = self._abs(path)
+        if posixpath.dirname(p) not in self.dirs:
+            p = posixpath.join(self.cwd, posixpath.basename(p))
+        self.files[p] = data.decode("latin-1")
+        return p
 
     # ── commands ───────────────────────────────────────────────────────────
     def c_exit(self, a, i=None):
@@ -575,6 +631,7 @@ class FakeShell:
         if p not in getattr(self, "_execs", set()) and not p.startswith(("/bin", "/sbin", "/usr")):
             return f"-sh: {a[0]}: Permission denied", False
         self._log("exec_attempt", payload=p, path=p, args=" ".join(a[1:])[:300])
+        self.capture_file(p)              # the attacker is running it: keep the sample now
         content = self._read(p) or ""
         if content.startswith("#!") or content.startswith("cd ") or "wget" in content:
             return ""
@@ -585,7 +642,8 @@ class FakeShell:
         urls = [x for x in a if URL_RE.match(x) or re.match(r"^[\w.-]+\.\w+/", x) or HOST_RE.match(x.split("/")[0])]
         if not urls:
             return "BusyBox v1.31.1 multi-call binary.\n\nUsage: wget [-c|--continue] [-q|--quiet] [-O FILE] URL", False
-        url = urls[0]
+        url = self.normalize_url(urls[0])
+        self._log_download(url, tool="wget")
         out_name = None
         if "-O" in a:
             idx = a.index("-O")
@@ -603,6 +661,7 @@ class FakeShell:
         urls = [x for x in a if URL_RE.match(x) or "." in x and not x.startswith("-")]
         if not urls:
             return "curl: try 'curl --help' for more information", False
+        self._log_download(self.normalize_url(urls[0]), tool="curl")
         if "-o" in a or "-O" in a:
             name = a[a.index("-o") + 1] if "-o" in a and a.index("-o") + 1 < len(a) else \
                 posixpath.basename(urls[0].split("?")[0])
@@ -614,7 +673,7 @@ class FakeShell:
         host = next((x for x in a if HOST_RE.match(x)), None)
         rfile = a[a.index("-r") + 1] if "-r" in a and a.index("-r") + 1 < len(a) else None
         if host and rfile:
-            self._log("download_attempt", payload=f"tftp://{host}/{rfile}", url=f"tftp://{host}/{rfile}")
+            self._log_download(f"tftp://{host}/{rfile}", tool="tftp")
             self.files[self._abs(posixpath.basename(rfile))] = f"# tftp {host} {rfile}\n"
             return ""
         return "BusyBox v1.31.1 multi-call binary.\n\nUsage: tftp [OPTIONS] HOST [PORT]", False
@@ -623,7 +682,7 @@ class FakeShell:
         pos = [x for x in a if not x.startswith("-")]
         if len(pos) >= 3:
             url = f"ftp://{pos[0]}/{pos[2]}"
-            self._log("download_attempt", payload=url, url=url)
+            self._log_download(url, tool="ftpget")
             self.files[self._abs(pos[1])] = f"# ftp {url}\n"
             return ""
         return "Usage: ftpget [OPTIONS] HOST [LOCAL_FILE] REMOTE_FILE", False
@@ -746,7 +805,7 @@ class FakeShell:
         if self.device != "sensor":
             return self._not_found("sensorctl"), False
         if a and a[0] == "set" and len(a) >= 3:
-            changed = self.state.sensor_config(actor="telnet", **{a[1]: a[2]})
+            changed = self.state.sensor_config(f"telnet:{self.session.ip if self.session else 'local'}", {a[1]: a[2]})
             if changed:
                 self._log("state_change", payload=f"{a[1]}={a[2]}", device_field=a[1], value=a[2])
                 return f"OK {a[1]}={a[2]}"

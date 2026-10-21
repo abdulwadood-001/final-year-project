@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from common.db import Session
 from common.state import STATE, start_heartbeat
 from common.creds import is_weak
+from common import capture
 
 PORT = int(os.environ.get("MQTT_PORT", 1883))
 ALLOW_ANONYMOUS = os.environ.get("MQTT_ALLOW_ANONYMOUS", "true").lower() == "true"
@@ -225,7 +226,7 @@ def apply_control(topic, payload, ip):
             cfg = json.loads(p) if p.startswith("{") else dict(x.split("=", 1) for x in p.split(",") if "=" in x)
         except Exception:
             cfg = {}
-        changed = STATE.sensor_config(actor=f"mqtt:{ip}", **{k: str(v) for k, v in cfg.items()})
+        changed = STATE.sensor_config(f"mqtt:{ip}", cfg if isinstance(cfg, dict) else {})
         return changed or None
     if topic == "camera/cmd":
         if p.lower() in ("stop", "off", "disable"):
@@ -348,6 +349,8 @@ class Client:
     def on_publish(self, flags, data):
         topic, payload_b, qos, pid, retain = parse_publish(flags, data)
         payload = payload_b.decode("utf-8", "replace")
+        if capture.looks_interesting(payload_b):        # binary blob pushed through the broker
+            capture.store(self.s, payload_b, "mqtt_payload", filename=topic)
         changed = None
         if topic in CONTROL_TOPICS:
             changed = apply_control(topic, payload, self.ip)

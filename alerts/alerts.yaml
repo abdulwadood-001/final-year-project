@@ -22,6 +22,7 @@ types:
   RTSP_ROUTE_ENUM:          { enabled: false }
   MALWARE_DELIVERY:         { enabled: true,  min_severity: HIGH }
   MIRAI_SIGNATURE:          { enabled: true,  min_severity: HIGH }
+  MALWARE_FAMILY:           { enabled: true,  min_severity: HIGH }      # YARA match on a captured sample
   BOTNET_C2:                { enabled: true,  min_severity: HIGH }
   ICS_UNAUTHORIZED_COMMAND: { enabled: true,  min_severity: HIGH }
   ICS_PROCESS_MONITORING:   { enabled: false }

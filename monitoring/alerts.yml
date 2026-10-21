@@ -1,0 +1,30 @@
+# HoneyBot-IoT — Prometheus alert rules (visible in Prometheus → Alerts and in Grafana)
+groups:
+  - name: honeybot
+    rules:
+      - alert: HoneypotServiceDown
+        expr: honeybot_service_up == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Honeypot service {{ $labels.service }} has no heartbeat"
+      - alert: ContainerHighMemory
+        expr: |
+          container_memory_working_set_bytes{name=~"honeybot_.*"}
+            / on(name) (container_spec_memory_limit_bytes{name=~"honeybot_.*"} > 0) > 0.9
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.name }} is above 90% of its memory limit"
+      - alert: ContainerHighCPU
+        expr: rate(container_cpu_usage_seconds_total{name=~"honeybot_.*"}[2m]) > 0.7
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.name }} sustained CPU above 70% of one core"
+      - alert: AttackSurge
+        expr: sum(rate(honeybot_events_total[5m])) > 50
+        for: 5m
+        labels: { severity: info }
+        annotations:
+          summary: "Attack volume above 50 events/s for 5 minutes"

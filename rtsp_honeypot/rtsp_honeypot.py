@@ -195,7 +195,7 @@ class RTSPConn:
         finally:
             if self.playing:
                 v = max(0, int(STATE.field("cctv", "viewers", "1") or 1) - 1)
-                STATE.set("cctv", actor="rtsp", viewers=v)
+                STATE.set("cctv", actor="system", viewers=v)
             self.s.close()
             try:
                 self.w.close()

@@ -19,6 +19,7 @@ import urllib.request
 import urllib.parse
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 
 import yaml
 
@@ -103,16 +104,32 @@ def send_telegram(text):
         return "failed", str(e)[:300]
 
 
-def send_email(subject, html_body, text_body):
-    host, to = os.environ.get("SMTP_HOST"), os.environ.get("ALERT_EMAIL_TO")
-    if not (host and to) or not (config().get("channels") or {}).get("email", {}).get("enabled", True):
+def email_configured():
+    return bool(os.environ.get("SMTP_HOST") and os.environ.get("ALERT_EMAIL_TO")) and \
+        (config().get("channels") or {}).get("email", {}).get("enabled", True)
+
+
+def send_email(subject, html_body, text_body, attachments=None):
+    """attachments: list of (filename, bytes, mime) – used for the PDF threat reports."""
+    to = os.environ.get("ALERT_EMAIL_TO")
+    host = os.environ.get("SMTP_HOST")
+    if not email_configured():
         return "disabled", "SMTP_HOST / ALERT_EMAIL_TO not set"
-    msg = MIMEMultipart("alternative")
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(text_body, "plain", "utf-8"))
+    alt.attach(MIMEText(html_body, "html", "utf-8"))
+    if attachments:
+        msg = MIMEMultipart("mixed")
+        msg.attach(alt)
+        for name, data, mime in attachments:
+            part = MIMEApplication(data, _subtype=mime.split("/")[-1])
+            part.add_header("Content-Disposition", "attachment", filename=name)
+            msg.attach(part)
+    else:
+        msg = alt
     msg["Subject"] = subject
     msg["From"] = os.environ.get("SMTP_FROM", os.environ.get("SMTP_USER", "honeybot@localhost"))
     msg["To"] = to
-    msg.attach(MIMEText(text_body, "plain", "utf-8"))
-    msg.attach(MIMEText(html_body, "html", "utf-8"))
     try:
         port = int(os.environ.get("SMTP_PORT", 587))
         with smtplib.SMTP(host, port, timeout=15) as s:

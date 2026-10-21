@@ -1,0 +1,7 @@
+# HoneyBot-IoT — outbound-isolation enforcer (runs with network_mode: host)
+FROM alpine:3.20
+RUN apk add --no-cache bash iptables iptables-legacy
+COPY deploy/firewall.sh /usr/local/bin/firewall.sh
+RUN chmod +x /usr/local/bin/firewall.sh
+ENTRYPOINT ["/usr/local/bin/firewall.sh"]
+CMD ["loop"]

@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════════
---  HoneyBot-IoT — PostgreSQL schema (v0.6 — 60% milestone)
+--  HoneyBot-IoT — PostgreSQL schema (v0.7 — 70% milestone)
 --
 --  One unified event store:
 --    sessions   one row per attacker connection (any protocol)
@@ -9,6 +9,10 @@
 --    detections rule-based classifications + MITRE ATT&CK technique IDs
 --    iocs       indicators of compromise (URLs, hashes, IPs, domains)
 --    alerts     notification log (Telegram / e-mail) incl. dedupe decisions
+--    file_captures  stored malware samples: SHA-256, MIME/arch, YARA verdict (v0.7)
+--    ioc_sightings  one row per IOC observation, so iocs.hits is exact (v0.7)
+--  The whole file is idempotent: the API / intel engine re-apply it at start-up,
+--  which upgrades an existing v0.6 database in place.
 --  The old per-protocol tables are kept as VIEWS so older queries still work.
 -- ═══════════════════════════════════════════════════════════════════════════
 
@@ -140,6 +144,47 @@ CREATE TABLE IF NOT EXISTS alerts (
     error        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(ts);
+
+-- ── v0.7: malware sample store (SDS data dictionary: file_captures) ─────────
+CREATE TABLE IF NOT EXISTS file_captures (
+    id            BIGSERIAL PRIMARY KEY,
+    ts            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    session_id    UUID,
+    ip            TEXT NOT NULL,
+    protocol      TEXT,
+    device        TEXT,
+    source        TEXT NOT NULL,          -- http_upload | http_body | shell_write | ssh_stdin | mqtt_payload
+    filename      TEXT,
+    sha256        CHAR(64) NOT NULL,
+    md5           CHAR(32),
+    size          BIGINT NOT NULL,
+    mime_type     TEXT,
+    arch          TEXT,                   -- ELF machine, e.g. ARM / MIPS / x86-64
+    storage_path  TEXT,                   -- quarantine path (non-executable volume)
+    yara_result   TEXT,                   -- 'CLEAN' | comma-separated rule names | NULL = not scanned
+    yara_matches  TEXT[] DEFAULT '{}',
+    scanned_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_captures_sha ON file_captures(sha256);
+CREATE INDEX IF NOT EXISTS idx_captures_ts  ON file_captures(ts);
+CREATE INDEX IF NOT EXISTS idx_captures_unscanned ON file_captures(id) WHERE scanned_at IS NULL;
+
+-- ── v0.7: exact IOC hit counting ───────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS ioc_sightings (
+    source     TEXT   NOT NULL,           -- event | detection | capture
+    source_id  BIGINT NOT NULL,
+    type       TEXT   NOT NULL,
+    value      TEXT   NOT NULL,
+    seen_at    TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (source, source_id, type, value)
+);
+
+-- ── v0.7: small key/value store for the intel engine (report schedule etc.) ─
+CREATE TABLE IF NOT EXISTS intel_state (
+    key        TEXT PRIMARY KEY,
+    value      TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- ── Backwards-compatible views (old per-protocol tables) ────────────────────
 CREATE OR REPLACE VIEW ssh_attempts AS

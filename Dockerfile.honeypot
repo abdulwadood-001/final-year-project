@@ -1,5 +1,9 @@
+# HoneyBot-IoT — image for the five protocol honeypots + the device-state service
 FROM python:3.12-slim
-RUN useradd -m -u 10001 honey && mkdir -p /app/data && chown -R honey /app
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+# same uid as the API/intel image: quarantined samples are written 0400 and must
+# stay readable by the intel engine's YARA scanner
+RUN useradd -m -u 10001 honey && mkdir -p /app/data /app/captures && chown -R honey /app
 WORKDIR /app
 COPY requirements-base.txt requirements-honeypot.txt requirements-api.txt ./
 RUN pip install --no-cache-dir -r requirements-honeypot.txt -r requirements-api.txt
