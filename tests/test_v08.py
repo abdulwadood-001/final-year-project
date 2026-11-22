@@ -234,6 +234,7 @@ def test_fakeshell_has_cctv_profile():
 
 # ── sandbox request validation (no Docker needed) ───────────────────────────
 def test_sandbox_sid_and_image_format():
+    pytest.importorskip("docker")          # the sandbox service needs the docker SDK
     sandbox = importlib.import_module("sandbox.sandbox")
     assert sandbox.SID_RE.match("11111111-2222-3333-4444-555555555555")
     assert not sandbox.SID_RE.match("../etc/passwd")
