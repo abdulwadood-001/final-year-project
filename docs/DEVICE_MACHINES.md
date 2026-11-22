@@ -108,6 +108,22 @@ the device's shell** (output returned, downloads logged, drops quarantined):
 Each match raises an `exploit_attempt` event (with the CVE id) and feeds the
 `PROTOCOL_EXPLOIT` detection.
 
+### 4a. Device-specific IoT attacks (v0.8.1)
+
+Beyond command injection, these target a specific device's own weakness. The disclosed /
+accepted credentials match the camera's real weak-credential profile, so the full
+disclosure-to-compromise chain is captured.
+
+| Device | Route / vector | Attack | Detection |
+|---|---|---|---|
+| Camera | `GET /system.ini?loginuse&loginpass` | **CVE-2017-8225** GoAhead credential leak | `CREDENTIAL_DISCLOSURE` |
+| Camera | `GET /device.rsp` + `Cookie: uid=admin` | **CVE-2018-9995** DVR auth-bypass user dump | `CREDENTIAL_DISCLOSURE` |
+| Camera | `POST /onvif/device_service` `CreateUsers` | ONVIF rogue-administrator creation | `UNAUTHORIZED_ACCESS_GRANT` |
+| Sensor | Modbus write to telemetry regs 40001-3 | **False-data injection** (masks live alarms) | `FALSE_DATA_INJECTION` |
+| Sensor | Modbus FC5 force coils 1/2 | **Actuator manipulation** (relay/valve) | `ICS_ACTUATOR_MANIPULATION` |
+| Lock | Valid API token with no prior `/auth` | **Token replay** (stolen/predictable token) | `TOKEN_REPLAY` |
+| Lock | Many invalid API tokens | Token guessing | `TOKEN_BRUTEFORCE` |
+
 ## 5. New detections (MITRE ATT&CK)
 
 Post-exploitation in the real shell and the new protocols are classified by
@@ -125,6 +141,12 @@ Post-exploitation in the real shell and the new protocols are classified by
 | `MQTT_FLOOD` | publish flood | T1499, T0814 |
 | `ICS_PARAMETER_TAMPERING` | Modbus register write | T0836, T0831, T0855 |
 | `ICS_DEVICE_SCAN` | Modbus register/coil enumeration | T0846, T0801 |
+| `FALSE_DATA_INJECTION` | Modbus write to a telemetry register (CRITICAL when it masks an alarm) | T0856, T0832, T0815 |
+| `ICS_ACTUATOR_MANIPULATION` | Modbus FC5 force of a relay/valve coil | T0831, T0855 |
+| `CREDENTIAL_DISCLOSURE` | camera credential leak (CVE-2017-8225 / 2018-9995) | T1552.001, T1190, T0812 |
+| `UNAUTHORIZED_ACCESS_GRANT` | ONVIF rogue-admin creation | T1136, T1098, T0859 |
+| `TOKEN_REPLAY` | valid lock API token used without authenticating | T1134, T1078.001, T0859 |
+| `TOKEN_BRUTEFORCE` | ≥5 invalid API-token attempts | T1110, T1552 |
 
 ## 6. End-to-end test result
 

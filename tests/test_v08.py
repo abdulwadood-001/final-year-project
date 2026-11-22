@@ -104,10 +104,32 @@ def test_modbus_write_threshold_updates_state(modbus):
     assert any(t == "state_change" for t, _ in s.events)
 
 
-def test_modbus_readonly_register_rejected(modbus):
+def test_modbus_out_of_range_register_rejected(modbus):
     conn = modbus.ModbusConn(None, _FakeSession())
-    resp = conn._dispatch(struct.pack(">BHH", 6, 0, 999))  # reg idx0 = temperature (read-only)
+    resp = conn._dispatch(struct.pack(">BHH", 6, 50, 1))   # reg idx50 is not mapped
     assert resp[0] == 0x86 and resp[1] == modbus.EXC_ILLEGAL_ADDRESS
+
+
+def test_modbus_false_data_injection(modbus):
+    from common.state import STATE
+    STATE.set("sensor", alarm="TEMP_HIGH")                  # a live alarm to mask
+    s = _FakeSession()
+    conn = modbus.ModbusConn(None, s)
+    resp = conn._dispatch(struct.pack(">BHH", 6, 0, 200))   # write telemetry reg0 (temperature=20.0)
+    assert resp == struct.pack(">BHH", 6, 0, 200)
+    assert STATE.field("sensor", "temperature") == "20.0"
+    fd = [k.get("payload","") for t, k in s.events if t == "modbus_false_data"]
+    assert fd and "masking active alarm" in fd[0]
+
+
+def test_modbus_actuator_force(modbus):
+    from common.state import STATE
+    s = _FakeSession()
+    conn = modbus.ModbusConn(None, s)
+    resp = conn._dispatch(struct.pack(">BHH", 5, 1, 0xFF00))  # force relay coil ON
+    assert resp[0] == 5
+    assert STATE.field("sensor", "relay") == "on"
+    assert any(t == "modbus_actuator" for t, _ in s.events)
 
 
 def test_modbus_illegal_function(modbus):
@@ -131,11 +153,55 @@ def test_exploit_command_extraction():
     ("/ctrlt/DeviceUpgrade_1", "POST", True),
     ("/GponForm/diag_Form", "GET", True),
     ("/cgi-bin/supervisor/ping", "GET", True),
+    ("/system.ini", "GET", True),
+    ("/device.rsp", "GET", True),
+    ("/onvif/device_service", "POST", True),
     ("/index.html", "GET", False),
 ])
 def test_exploit_routing(path, method, ok):
     from http_honeypot import exploits
     assert (exploits.match(path, method) is not None) == ok
+
+
+class _Req:
+    def __init__(self, headers=None):
+        self.headers = headers or {}
+
+
+def _run_handler(path, method, headers=None, body=b""):
+    from http_honeypot import exploits
+    s = _FakeSession()
+    handler = exploits.match(path, method)
+    result = handler("cctv", s, _Req(headers), path, "", body)
+    return s, result
+
+
+def test_camera_cve_2017_8225_leaks_working_creds():
+    from http_honeypot import exploits
+    s, (status, _mt, body) = _run_handler("/system.ini", "GET")
+    assert status == 200
+    assert exploits.CAM_USER in body and exploits.CAM_PASS in body
+    assert any(t == "credential_disclosure" for t, _ in s.events)
+    # the leaked credential must actually work on the camera (coherent attack chain)
+    from common.creds import is_weak
+    assert is_weak("cctv", exploits.CAM_USER, exploits.CAM_PASS)
+
+
+def test_camera_cve_2018_9995_requires_bypass_cookie():
+    s_no, (_st, _mt, body_no) = _run_handler("/device.rsp", "GET")
+    assert '"list":[]' in body_no
+    s_yes, (_st, _mt, body_yes) = _run_handler("/device.rsp", "GET", headers={"cookie": "uid=admin"})
+    assert "admin" in body_yes
+    assert any(t == "credential_disclosure" for t, _ in s_yes.events)
+
+
+def test_onvif_create_users_is_access_grant():
+    s, (status, _mt, _body) = _run_handler(
+        "/onvif/device_service", "POST",
+        body=b"<CreateUsers><User><Username>evil</Username></User></CreateUsers>")
+    assert status == 200
+    grants = [k.get("payload","") for t, k in s.events if t == "access_grant"]
+    assert grants and "evil" in grants[0]
 
 
 # ── behavioural detection rules + MITRE coverage ────────────────────────────

@@ -46,15 +46,21 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | modbus | %(message
 log = logging.getLogger("modbus")
 
 # holding-register index (0-based) -> shared-state field + scale + writability
+# Telemetry registers (0-2) are writable on real gear: an attacker overwrites the
+# REPORTED reading (false-data injection / Oldsmar-style), so we accept the write,
+# apply it to the shared state and flag it as manipulation of control.
 HOLDING = {
-    0: ("temperature", 10, False),
-    1: ("pressure", 10, False),
-    2: ("humidity", 10, False),
+    0: ("temperature", 10, True),
+    1: ("pressure", 10, True),
+    2: ("humidity", 10, True),
     3: ("temp_threshold", 10, True),
     4: ("pressure_threshold", 10, True),
     5: ("interval", 1, True),
     6: ("mode", 1, True),           # 0=auto 1=manual
 }
+TELEMETRY = {0, 1, 2}               # live-reading registers → writes = false-data injection
+# write-single-coil (FC5) addresses that drive physical outputs on the sensor node
+ACTUATOR_COILS = {1: "relay", 2: "valve"}
 MODE_NUM = {"auto": 0, "manual": 1}
 MODE_STR = {0: "auto", 1: "manual"}
 
@@ -180,6 +186,18 @@ class ModbusConn:
         else:
             newval = value / scale
             newval = int(newval) if field == "interval" else round(newval, 1)
+        if idx in TELEMETRY:
+            # false-data injection: overwrite the reported reading directly (not a config key).
+            # If the device is currently in alarm, overwriting the reading masks that alarm.
+            masked = STATE.field("sensor", "alarm", "none") != "none"
+            STATE.set("sensor", actor=f"modbus:{self.s.ip}", **{field: newval})
+            self.s.event("state_change", payload=f"{field}={newval}", device_field=field,
+                         value=str(newval), via="modbus")
+            self.s.event("modbus_false_data", payload=f"{40001 + idx}={value} (reported {field}={newval}"
+                         + (", masking active alarm" if masked else "") + ")",
+                         function=6, address=idx, field=field, masked_alarm=masked,
+                         command=f"modbus inject {40001 + idx}={value}")
+            return True
         changed = STATE.sensor_config(f"modbus:{self.s.ip}", {field: newval})
         if changed:
             self.s.event("state_change", payload=f"{field}={newval}", device_field=field,
@@ -215,8 +233,19 @@ class ModbusConn:
         if addr == 0:                                        # coil 0 = alarm reset
             STATE.sensor_config(f"modbus:{self.s.ip}", {"alarm": "none" if not on else "MANUAL"})
             self.s.event("state_change", payload=f"alarm_coil={on}", device_field="alarm", via="modbus")
-        self.s.event("modbus_write", payload=f"write coil {addr}={'ON' if on else 'OFF'}",
-                     address=addr, command=f"modbus write coil {addr}={'ON' if on else 'OFF'}")
+            self.s.event("modbus_write", payload=f"write coil {addr}={'ON' if on else 'OFF'}",
+                         address=addr, command=f"modbus write coil {addr}={'ON' if on else 'OFF'}")
+        elif addr in ACTUATOR_COILS:                         # force a physical output (relay/valve)
+            name = ACTUATOR_COILS[addr]
+            STATE.set("sensor", actor=f"modbus:{self.s.ip}", **{name: "on" if on else "off"})
+            self.s.event("state_change", payload=f"{name}={'on' if on else 'off'}",
+                         device_field=name, via="modbus")
+            self.s.event("modbus_actuator", payload=f"forced {name} {'ON' if on else 'OFF'} via coil {addr}",
+                         address=addr, actuator=name, state="on" if on else "off",
+                         command=f"modbus force {name}={'ON' if on else 'OFF'}")
+        else:
+            self.s.event("modbus_write", payload=f"write coil {addr}={'ON' if on else 'OFF'}",
+                         address=addr, command=f"modbus write coil {addr}={'ON' if on else 'OFF'}")
         return struct.pack(">BHH", 5, addr, value)
 
     def _report_id(self):

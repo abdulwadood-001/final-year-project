@@ -263,24 +263,86 @@ def behavioural():
 
 
 def modbus_ics():
-    """Modbus/TCP ICS activity: register writes (parameter tampering) and scanning."""
+    """Modbus/TCP ICS activity: register writes (parameter tampering), false-data
+    injection, actuator manipulation and scanning."""
     out = []
     rows = fetchall("""
         SELECT ip, device, session_id,
                COUNT(*) FILTER (WHERE event_type='modbus_write'),
                COUNT(*) FILTER (WHERE event_type='modbus_request'),
-               string_agg(DISTINCT payload, '; ') FILTER (WHERE event_type='modbus_write')
+               COUNT(*) FILTER (WHERE event_type='modbus_false_data'),
+               COUNT(*) FILTER (WHERE event_type='modbus_false_data' AND (raw->>'masked_alarm')='true'),
+               COUNT(*) FILTER (WHERE event_type='modbus_actuator'),
+               string_agg(DISTINCT payload, '; ') FILTER (WHERE event_type='modbus_write'),
+               string_agg(DISTINCT payload, '; ') FILTER (WHERE event_type='modbus_false_data'),
+               string_agg(DISTINCT payload, '; ') FILTER (WHERE event_type='modbus_actuator')
         FROM events WHERE protocol='Modbus' AND ts > NOW() - INTERVAL '15 minutes'
         GROUP BY ip, device, session_id
     """)
-    for ip, dev, sid, writes, reads, wpayload in rows:
+    for ip, dev, sid, writes, reads, false_data, masked, actuator, wp, fp, ap in rows:
+        if false_data:
+            sev = "CRITICAL" if masked else "HIGH"
+            out.append(_det(ip, "FALSE_DATA_INJECTION", sev,
+                            f"{false_data} Modbus false-data write(s)"
+                            + (f", {masked} masking a live alarm" if masked else "")
+                            + f": {(fp or '')[:150]}", "Modbus", dev, sid))
+        if actuator:
+            out.append(_det(ip, "ICS_ACTUATOR_MANIPULATION", "CRITICAL",
+                            f"{actuator} physical output(s) forced over Modbus: {(ap or '')[:150]}",
+                            "Modbus", dev, sid))
         if writes:
             out.append(_det(ip, "ICS_PARAMETER_TAMPERING", "CRITICAL",
-                            f"{writes} Modbus register write(s): {(wpayload or '')[:160]}",
-                            "Modbus", dev, sid))
-        if reads >= 10 and not writes:
+                            f"{writes} Modbus register write(s): {(wp or '')[:150]}", "Modbus", dev, sid))
+        if reads >= 10 and not (writes or false_data or actuator):
             out.append(_det(ip, "ICS_DEVICE_SCAN", "MEDIUM",
                             f"{reads} Modbus reads (register/coil enumeration)", "Modbus", dev, sid))
+    return out
+
+
+def camera_disclosure():
+    """Camera credential disclosure / DVR auth-bypass / ONVIF rogue-admin creation."""
+    out = []
+    rows = fetchall("""
+        SELECT ip, device, session_id,
+               COUNT(*) FILTER (WHERE event_type='credential_disclosure'),
+               COUNT(*) FILTER (WHERE event_type='access_grant'),
+               string_agg(DISTINCT raw->>'cve', ', ') FILTER (WHERE event_type='exploit_attempt'),
+               string_agg(DISTINCT payload, '; ') FILTER (WHERE event_type='credential_disclosure'),
+               string_agg(DISTINCT payload, '; ') FILTER (WHERE event_type='access_grant')
+        FROM events WHERE ts > NOW() - INTERVAL '15 minutes'
+          AND event_type IN ('credential_disclosure','access_grant','exploit_attempt')
+        GROUP BY ip, device, session_id
+    """)
+    for ip, dev, sid, disc, grant, cves, dp, gp in rows:
+        if disc:
+            out.append(_det(ip, "CREDENTIAL_DISCLOSURE", "HIGH",
+                            f"Camera credentials disclosed ({cves or 'web'}): {(dp or '')[:150]}",
+                            "HTTP", dev, sid))
+        if grant:
+            out.append(_det(ip, "UNAUTHORIZED_ACCESS_GRANT", "CRITICAL",
+                            f"Rogue administrator created: {(gp or '')[:150]}", "HTTP", dev, sid))
+    return out
+
+
+def token_abuse():
+    """Smart-lock API token replay (stolen/predictable token) and token brute-force."""
+    out = []
+    rows = fetchall("""
+        SELECT ip, device, session_id,
+               COUNT(*) FILTER (WHERE event_type='token_replay'),
+               COUNT(*) FILTER (WHERE event_type='token_guess')
+        FROM events WHERE ts > NOW() - INTERVAL '15 minutes'
+          AND event_type IN ('token_replay','token_guess')
+        GROUP BY ip, device, session_id
+    """)
+    for ip, dev, sid, replay, guess in rows:
+        if replay:
+            out.append(_det(ip, "TOKEN_REPLAY", "HIGH",
+                            f"Valid lock API token used without authenticating ({replay}×) — "
+                            "stolen or predictable token", "HTTP", dev, sid))
+        if guess >= 5:
+            out.append(_det(ip, "TOKEN_BRUTEFORCE", "MEDIUM",
+                            f"{guess} invalid API-token attempts (token guessing)", "HTTP", dev, sid))
     return out
 
 
@@ -371,7 +433,8 @@ def multi_protocol():
 
 ALL_RULES = [brute_force, credential_compromise, credential_stuffing, reconnaissance,
              malware_delivery, malware_family, mirai_and_post_exploitation, behavioural, modbus_ics,
-             mqtt_and_ics, protocol_exploit, stream_access, multi_protocol]
+             camera_disclosure, token_abuse, mqtt_and_ics, protocol_exploit, stream_access,
+             multi_protocol]
 
 
 def run_rules():

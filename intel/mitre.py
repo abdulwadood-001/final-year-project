@@ -47,6 +47,9 @@ NAMES = {
     "T1611":     "Escape to Host",
     "T1610":     "Deploy Container",
     "T1572":     "Protocol Tunneling",
+    "T1134":     "Access Token Manipulation",
+    "T1136":     "Create Account",
+    "T1552":     "Unsecured Credentials",
     # ICS
     "T0812": "ICS: Default Credentials",
     "T0855": "ICS: Unauthorized Command Message",
@@ -59,6 +62,9 @@ NAMES = {
     "T0866": "ICS: Exploitation of Remote Services",
     "T0869": "ICS: Standard Application Layer Protocol",
     "T0831": "ICS: Manipulation of Control",
+    "T0856": "ICS: Spoof Reporting Message",
+    "T0832": "ICS: Manipulation of View",
+    "T0859": "ICS: Valid Accounts",
 }
 
 TECHNIQUES_BY_TYPE = {
@@ -88,6 +94,12 @@ TECHNIQUES_BY_TYPE = {
     "MQTT_FLOOD":              ["T1499", "T0814"],
     "ICS_PARAMETER_TAMPERING": ["T0836", "T0831", "T0855"],
     "ICS_DEVICE_SCAN":         ["T0846", "T0801"],
+    "FALSE_DATA_INJECTION":    ["T0856", "T0832", "T0815"],
+    "ICS_ACTUATOR_MANIPULATION": ["T0831", "T0855"],
+    "CREDENTIAL_DISCLOSURE":   ["T1552.001", "T1190", "T0812"],
+    "UNAUTHORIZED_ACCESS_GRANT": ["T1136", "T1098", "T0859"],
+    "TOKEN_REPLAY":            ["T1134", "T1078.001", "T0859"],
+    "TOKEN_BRUTEFORCE":        ["T1110", "T1552"],
 }
 
 COMMAND_RULES = [

@@ -320,10 +320,39 @@ lock = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 add_logging(lock, "smartlock", LOCK_SERVER, LOCK_PORT)
 
 
+# IPs that obtained a token the legitimate way (POST /api/v1/auth with valid creds).
+# A VALID token presented by any other IP is a stolen/guessed token (replay); an
+# INVALID token is a guess. Both are logged for the token-abuse detection rules.
+_lock_authed_ips = set()
+_lock_auth_lock = threading.Lock()
+
+
+def _mark_authed(ip):
+    with _lock_auth_lock:
+        _lock_authed_ips.add(ip)
+        if len(_lock_authed_ips) > 10000:
+            _lock_authed_ips.clear()
+
+
 def _lock_token_ok(request):
     tok = request.headers.get("authorization", "")
     tok = tok[7:] if tok.lower().startswith("bearer ") else request.query_params.get("token", "")
-    return tok and tok == STATE.field("smartlock", "api_token")
+    if not tok:
+        return False
+    valid = tok == STATE.field("smartlock", "api_token")
+    ip = _ip(request)
+    s = getattr(request.state, "hs", None)
+    with _lock_auth_lock:
+        authed = ip in _lock_authed_ips
+    if s is not None:
+        if valid and not authed:
+            # a correct token from an IP that never logged in → stolen / predictable token
+            s.event("token_replay", payload=f"valid API token used without prior auth ({tok[:8]}…)",
+                    token_prefix=tok[:8], path=request.url.path)
+        elif not valid:
+            s.event("token_guess", payload=f"invalid API token {tok[:12]}… on {request.url.path}",
+                    token_prefix=tok[:12], path=request.url.path)
+    return valid
 
 
 @lock.get("/")
@@ -349,6 +378,7 @@ async def lock_auth(request: Request):
     if not ok:
         await asyncio.sleep(0.8)
         return JSONResponse({"error": "invalid_credentials"}, status_code=401)
+    _mark_authed(_ip(request))
     exp = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(timespec="seconds")
     return {"token": STATE.field("smartlock", "api_token"), "expires": exp}
 

