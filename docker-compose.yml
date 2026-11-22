@@ -56,6 +56,7 @@ volumes:
   nginx_auth:    # bcrypt dashboard credentials written by auth-init
   prometheus_data:
   grafana_data:
+  ml_models:     # Module 8 trained model artifacts (persist across restarts)
   vm_ipc:        # per-session device-control FIFOs shared with the sandbox machines
     name: honeybot_vm_ipc
 
@@ -92,6 +93,7 @@ x-backend: &backend
   env_file: .env
   environment:
     CAPTURE_DIR: /app/captures
+    ML_API_URL: http://ml_api:5001            # Module 8 inference microservice
   volumes: ["./geoip:/app/geoip:ro", "captures:/app/captures:ro"]
   security_opt: ["no-new-privileges:true"]
   cap_drop: ["ALL"]
@@ -235,6 +237,30 @@ services:
     container_name: honeybot_intel
     command: ["python", "intel/engine.py"]
     networks: [backnet, egress]    # egress: Telegram / SMTP for alerts and daily reports
+
+  # ── Module 8: AI inference microservice (XGBoost + Isolation Forest + narrator) ─
+  ml_api:
+    build: { context: ., dockerfile: Dockerfile.ml }
+    image: honeybot/ml-api:0.8
+    container_name: honeybot_ml_api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ML_MODEL_DIR: /app/ml/artifacts
+      ML_AUTOTRAIN: "1"            # train a synthetic baseline on first boot if none exists
+      NARRATOR_BACKEND: ${NARRATOR_BACKEND:-template}
+    volumes:
+      - ml_models:/app/ml/artifacts
+    networks: [backnet]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:5001/health',timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 40s          # first boot trains the synthetic baseline
 
   # ── dashboard: login init + Nginx (the ONLY public web entry) ─────────────
   auth-init:

@@ -1,0 +1,7 @@
+-r requirements-base.txt
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+xgboost==3.0.0
+scikit-learn==1.5.2
+numpy==1.26.4
+joblib==1.4.2

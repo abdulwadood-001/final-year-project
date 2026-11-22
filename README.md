@@ -9,15 +9,21 @@ Supervisor: **Mrs. Sara Naveed**
 > RTSP, Modbus/TCP); a unified event store; rule-based detection with MITRE ATT&CK; malware
 > capture with YARA; STIX 2.1 export; PDF threat reports; a React/TypeScript SOC dashboard
 > with WebSocket live push; automatic network isolation; backups; and Prometheus/Grafana
-> monitoring. Module 8 (AI) has started: the labelled ML dataset is produced live.
+> monitoring.
 >
 > **New in v0.8:** each device now runs as its **own machine** (container) exposing only its
 > protocols; a successful SSH/Telnet login drops the attacker into a **real but restricted
 > BusyBox shell** in a throw-away, network-less sandbox that is wiped at logout; an
-> industrial **Modbus/TCP** service; and emulation of **real IoT web CVEs** (Hikvision
-> CVE-2021-36260, Dahua bypass, GPON, Realtek, Huawei) whose injected commands run in the
-> device's shell. See **`docs/DEVICE_MACHINES.md`**; the 70% status is in
-> **`docs/MILESTONE_70.md`**.
+> industrial **Modbus/TCP** service; emulation of **real IoT web CVEs** (Hikvision
+> CVE-2021-36260, Dahua bypass, GPON, Realtek, Huawei) and device-specific attacks (camera
+> credential disclosure CVE-2017-8225 / CVE-2018-9995, ONVIF rogue admin, Modbus false-data
+> injection, lock token replay). See **`docs/DEVICE_MACHINES.md`**.
+>
+> **Module 8 (AI) — complete:** an XGBoost six-class attack classifier, an Isolation Forest
+> anomaly detector and a 0–100 risk score, served by the `ml_api` microservice; the intel
+> engine classifies every finished session and attaches a plain-English threat narrative
+> (offline template, or GPT-4o / local Ollama). See **`docs/MODEL_CARD.md`**. The 70% status
+> is in **`docs/MILESTONE_70.md`**.
 
 ---
 
@@ -117,6 +123,7 @@ Source and development instructions: `dashboard/README.md`.
 | `GET /search?q=` | full-text search over commands and payloads, plus IP and credential |
 | `GET /export/events.csv`, `/export/stix`, `/report`, `/report.pdf` | exports and reports |
 | `GET /ml/summary`, `/ml/dataset.csv` | Module 8 labelled dataset |
+| `GET /ml/model`, `/ml/predictions`, `/ml/predictions/{id}`, `/ml/risk` | Module 8 AI: model metrics, per-session classification + threat narrative, risk overview |
 | `GET /metrics` | Prometheus exposition |
 | `POST /detect` | run an intel pass now |
 | `WS /ws` | live push: events, detections, device state |
@@ -145,7 +152,7 @@ ssh_honeypot/ telnet_honeypot/ http_honeypot/ (+ exploits.py) mqtt_honeypot/ rts
 intel/            engine.py · rules.py · mitre.py · correlate.py · geo.py · yara_scan.py · yara_rules/ · stix.py · report.py
 alerts/           notifier.py · alerts.yaml
 api/              api.py (REST + WebSocket)
-ml/               features.py (Module 8 dataset)
+ml/               features.py (dataset) · synth.py · train.py (XGBoost + Isolation Forest) · model.py · narrator.py · score.py · ml_api.py
 dashboard/        React + TypeScript SPA (built into the Nginx image)
 deploy/           firewall.sh · auth-init.sh · backup.sh · get_geoip.sh
 monitoring/       prometheus.yml · alerts.yml · grafana/

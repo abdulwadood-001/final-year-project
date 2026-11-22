@@ -186,6 +186,25 @@ CREATE TABLE IF NOT EXISTS intel_state (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ── Module 8 (AI): per-session classifier / anomaly / risk results ──────────
+CREATE TABLE IF NOT EXISTS ml_predictions (
+    session_id    UUID PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+    ip            TEXT,
+    device        TEXT,
+    protocol      TEXT,
+    ml_class      TEXT,              -- one of the six scope classes
+    confidence    REAL,
+    anomaly       REAL,              -- 0-1, Isolation Forest (1 = most anomalous)
+    risk          REAL,              -- 0-100 predictive risk score
+    probabilities JSONB,            -- full class → probability map
+    model_version TEXT,
+    narrative     TEXT,              -- LLM/template threat narrative
+    predicted_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ml_pred_class ON ml_predictions(ml_class);
+CREATE INDEX IF NOT EXISTS idx_ml_pred_risk ON ml_predictions(risk);
+CREATE INDEX IF NOT EXISTS idx_ml_pred_device ON ml_predictions(device);
+
 -- ── Backwards-compatible views (old per-protocol tables) ────────────────────
 CREATE OR REPLACE VIEW ssh_attempts AS
     SELECT id, ts AS timestamp, ip, src_port AS port, username, password,

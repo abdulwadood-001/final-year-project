@@ -109,14 +109,21 @@ def run_once():
             log.error("notifier failed: %s", e)
     for d in new:
         log.info("DETECTION %-8s %-24s %-15s %s", d["severity"], d["attack_type"], d["ip"], d["details"][:90])
+    ai_scored = 0
+    try:                                    # Module 8: classify + narrate finished sessions
+        from ml import score
+        ai_scored = score.score_pending()
+    except Exception as e:
+        log.error("AI scoring failed: %s", e)
     try:
         from intel import report
         report.maybe_send_daily()
     except Exception as e:
         log.error("daily report failed: %s", e)
-    log.info("pass: %d samples scanned, %d matches, %d new detections, %d alerts, %.2fs",
-             scanned, len(dets), len(new), sent, time.time() - t0)
-    return {"samples_scanned": scanned, "matches": len(dets), "new_detections": len(new), "alerts_sent": sent}
+    log.info("pass: %d samples scanned, %d matches, %d new detections, %d alerts, %d AI-scored, %.2fs",
+             scanned, len(dets), len(new), sent, ai_scored, time.time() - t0)
+    return {"samples_scanned": scanned, "matches": len(dets), "new_detections": len(new),
+            "alerts_sent": sent, "ai_scored": ai_scored}
 
 
 def main():

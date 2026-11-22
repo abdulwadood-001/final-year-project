@@ -31,12 +31,25 @@ from common.db import fetchdicts
 
 CLASS_PRIORITY = ["malware_delivery", "botnet_c2", "protocol_exploit", "brute_force", "port_scan", "normal"]
 TYPE_TO_CLASS = {
+    # malware delivery + post-exploitation payload behaviour
     "MALWARE_DELIVERY": "malware_delivery", "MALWARE_FAMILY": "malware_delivery",
-    "MIRAI_SIGNATURE": "malware_delivery",
+    "MIRAI_SIGNATURE": "malware_delivery", "PERSISTENCE": "malware_delivery",
+    "DEFENSE_EVASION": "malware_delivery", "CRYPTO_MINING": "malware_delivery",
+    "CONTAINER_ESCAPE": "malware_delivery", "REVERSE_SHELL": "malware_delivery",
+    # botnet C2 + ICS command/manipulation + DoS
     "BOTNET_C2": "botnet_c2", "ICS_UNAUTHORIZED_COMMAND": "botnet_c2", "DENIAL_OF_VIEW": "botnet_c2",
-    "PROTOCOL_EXPLOIT": "protocol_exploit",
-    "BRUTE_FORCE": "brute_force", "CREDENTIAL_STUFFING": "brute_force", "CREDENTIAL_COMPROMISE": "brute_force",
+    "ICS_PARAMETER_TAMPERING": "botnet_c2", "ICS_ACTUATOR_MANIPULATION": "botnet_c2",
+    "FALSE_DATA_INJECTION": "botnet_c2", "MQTT_FLOOD": "botnet_c2", "DENIAL_OF_SERVICE": "botnet_c2",
+    "UNAUTHORIZED_ACCESS_GRANT": "botnet_c2",
+    # public-facing exploitation / access-control bypass
+    "PROTOCOL_EXPLOIT": "protocol_exploit", "CREDENTIAL_DISCLOSURE": "protocol_exploit",
+    "TOKEN_REPLAY": "protocol_exploit",
+    # credential attacks
+    "BRUTE_FORCE": "brute_force", "CREDENTIAL_STUFFING": "brute_force",
+    "CREDENTIAL_COMPROMISE": "brute_force", "TOKEN_BRUTEFORCE": "brute_force",
+    # scanning / enumeration
     "RECONNAISSANCE": "port_scan", "WEB_SCAN": "port_scan", "RTSP_ROUTE_ENUM": "port_scan",
+    "ICS_DEVICE_SCAN": "port_scan",
 }
 
 FEATURE_SQL = """
