@@ -54,12 +54,12 @@ PROTOCOLS = ["SSH", "Telnet", "HTTP", "MQTT", "RTSP"]
 ACTIVITY = ("auth", "command", "http_request", "mqtt_publish", "mqtt_subscribe", "rtsp_request",
             "download_attempt", "state_change", "malformed", "file_write", "file_upload", "file_capture",
             "exec_attempt", "stream_access")
-SERVICES = ("ssh", "telnet", "http", "mqtt", "rtsp", "modbus", "device_state", "intel")
+SERVICES = ("ssh", "ssh_sensor", "telnet", "http", "mqtt", "rtsp", "modbus", "device_state", "intel")
 DEVICES = {
     "cctv": {"name": "CCTV Camera", "protocols": ["RTSP", "HTTP"], "services": ["rtsp", "http"]},
     "smartlock": {"name": "Smart Lock", "protocols": ["SSH", "HTTP", "MQTT"], "services": ["ssh", "http", "mqtt"]},
-    "sensor": {"name": "Industrial Sensor", "protocols": ["Telnet", "Modbus", "MQTT", "HTTP"],
-               "services": ["telnet", "modbus", "mqtt", "http"]},
+    "sensor": {"name": "Industrial Sensor", "protocols": ["Telnet", "SSH", "Modbus", "MQTT", "HTTP"],
+               "services": ["telnet", "ssh_sensor", "modbus", "mqtt", "http"]},
 }
 SECRET_FIELDS = ("api_token",)
 
@@ -596,6 +596,17 @@ def ml_prediction_detail(session_id: str):
     if not rows:
         return JSONResponse({"error": "not_found"}, status_code=404)
     return rows[0]
+
+
+@app.get("/api/ml/flow")
+def ml_flow(limit: int = Query(200, ge=1, le=2000)):
+    """Network-flow IDS verdicts (non-benign first) and a per-label summary."""
+    summary = fetchdicts("""SELECT label, COUNT(*) AS windows, COUNT(DISTINCT ip) AS ips,
+                                   round(avg(confidence)::numeric, 3) AS avg_conf
+                            FROM flow_detections GROUP BY label ORDER BY windows DESC""")
+    recent = _iso(fetchdicts("""SELECT ip, device, window_start, label, confidence FROM flow_detections
+                                WHERE label <> 'BENIGN' ORDER BY window_start DESC LIMIT %s""", (limit,)))
+    return {"summary": summary, "recent": recent}
 
 
 @app.get("/api/ml/forecast")

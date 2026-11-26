@@ -7,9 +7,11 @@ RFC 2326 signalling implemented with asyncio:
 Authentication: Basic AND Digest (MD5).  Basic gives us the cleartext password;
 for Digest we test the response against the device's weak-credential list and
 store the digest fields so they can be cracked offline.
-DESCRIBE returns a valid H.264 SDP, so tools like ffprobe / VLC / Cameradar
-accept the camera as real.  (Scope simplification agreed: signalling + auth
-capture; no real RTP video payload is streamed.)
+DESCRIBE returns a valid H.264 SDP built from a real encoded CCTV clip, and PLAY
+streams that clip as RTP (H.264, RFC 6184 single-NAL + FU-A) interleaved over the
+RTSP TCP connection, so VLC / ffplay / Cameradar show live camera video.
+UDP transport is answered with 461 Unsupported Transport: clients fall back to
+TCP-interleaved, and the honeypot never originates UDP (outbound isolation holds).
 """
 
 import os
@@ -36,6 +38,11 @@ VALID_ROUTES = ("/cam/realmonitor", "/Streaming/Channels/101", "/Streaming/Chann
                 "/stream1", "/stream2", "/h264", "/live", "/live/ch00_0", "/onvif1", "/11", "/12",
                 "/ch0_0.h264", "/video1", "/")
 PUBLIC = "OPTIONS, DESCRIBE, SETUP, TEARDOWN, PLAY, PAUSE, GET_PARAMETER, SET_PARAMETER"
+MEDIA = os.environ.get("RTSP_MEDIA", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                     "media", "cctv.h264"))
+FPS = int(os.environ.get("RTSP_FPS", 10))
+STREAM_MAX_SECONDS = int(os.environ.get("RTSP_STREAM_MAX_SECONDS", 300))
+RTP_MTU = 1400
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | rtsp | %(message)s")
 log = logging.getLogger("rtsp")
@@ -62,6 +69,84 @@ SDP_TEMPLATE = (
     "a=rtpmap:8 PCMA/8000\r\n"
     "a=recvonly\r\n"
 )
+
+
+# ── real H.264 media: Annex-B clip -> access units of NAL units ────────────
+def _split_nals(data):
+    """Split an Annex-B byte stream into NAL units (start codes removed)."""
+    nals, i, n = [], 0, len(data)
+    starts = []
+    while i < n - 3:
+        if data[i] == 0 and data[i + 1] == 0 and (data[i + 2] == 1 or
+                                                   (data[i + 2] == 0 and i + 3 < n and data[i + 3] == 1)):
+            sc = 3 if data[i + 2] == 1 else 4
+            starts.append((i, i + sc))
+            i += sc
+        else:
+            i += 1
+    for k, (_s, b) in enumerate(starts):
+        e = starts[k + 1][0] if k + 1 < len(starts) else n
+        nal = data[b:e].rstrip(b"\x00") if k + 1 < len(starts) else data[b:e]
+        if nal:
+            nals.append(nal)
+    return nals
+
+
+def load_media(path=MEDIA):
+    """Return (access_units, sps, pps). An access unit = list of NALs ending in a VCL NAL."""
+    try:
+        with open(path, "rb") as f:
+            nals = _split_nals(f.read())
+    except OSError as e:
+        log.warning("no RTSP media (%s) – PLAY will send no video", e)
+        return [], None, None
+    sps = next((x for x in nals if x[0] & 0x1F == 7), None)
+    pps = next((x for x in nals if x[0] & 0x1F == 8), None)
+    aus, cur = [], []
+    for nal in nals:
+        cur.append(nal)
+        if nal[0] & 0x1F in (1, 5):          # slice → end of access unit
+            aus.append(cur)
+            cur = []
+    return aus, sps, pps
+
+
+ACCESS_UNITS, SPS, PPS = [], None, None
+
+
+def build_sdp():
+    import base64
+    plid = SPS[1:4].hex().upper() if SPS else "42C01E"
+    sprop = (base64.b64encode(SPS).decode() + "," + base64.b64encode(PPS).decode()) if SPS and PPS else ""
+    return ("v=0\r\n"
+            f"o=- {random.randint(10**9, 10**10)} 1 IN IP4 0.0.0.0\r\n"
+            "s=Media Server\r\nc=IN IP4 0.0.0.0\r\nt=0 0\r\na=control:*\r\n"
+            "a=range:npt=now-\r\n"
+            "m=video 0 RTP/AVP 96\r\na=control:trackID=0\r\n"
+            f"a=framerate:{FPS}.000000\r\na=rtpmap:96 H264/90000\r\n"
+            f"a=fmtp:96 packetization-mode=1;profile-level-id={plid};sprop-parameter-sets={sprop}\r\n"
+            "a=recvonly\r\n")
+
+
+def rtp_packets(nal, seq, ts, ssrc, marker):
+    """Packetise one NAL unit (RFC 6184): a single-NAL packet, or FU-A fragments when it
+    exceeds the MTU. Returns (list_of_rtp_packets, next_seq)."""
+    import struct as _st
+
+    def hdr(m, sq):
+        return _st.pack("!BBHII", 0x80, (0x80 if m else 0) | 96, sq & 0xFFFF, ts & 0xFFFFFFFF, ssrc)
+    if len(nal) <= RTP_MTU:
+        return [hdr(marker, seq) + nal], seq + 1
+    out, nh, payload, first = [], nal[0], nal[1:], True
+    fu_ind = (nh & 0xE0) | 28
+    while payload:
+        chunk, payload = payload[:RTP_MTU - 2], payload[RTP_MTU - 2:]
+        last = not payload
+        fu_hdr = (0x80 if first else 0) | (0x40 if last else 0) | (nh & 0x1F)
+        out.append(hdr(marker and last, seq) + bytes([fu_ind, fu_hdr]) + chunk)
+        seq += 1
+        first = False
+    return out, seq
 
 
 def parse_auth_header(value):
@@ -101,9 +186,20 @@ class RTSPConn:
         self.rtsp_session = None
         self.playing = False
         self.requests = 0
+        self.channel = 0                     # RTP interleaved channel (RTCP = channel + 1)
+        self.stream_task = None
+        self.ssrc = random.getrandbits(32)
+        self.bytes_streamed = 0
 
     async def read_request(self):
-        head = await asyncio.wait_for(self.r.readuntil(b"\r\n\r\n"), timeout=60)
+        # while streaming, clients send RTCP as interleaved "$" frames on the same socket
+        while True:
+            first = await asyncio.wait_for(self.r.readexactly(1), timeout=60)
+            if first != b"$":
+                break
+            hdr = await self.r.readexactly(3)
+            await self.r.readexactly(int.from_bytes(hdr[1:3], "big"))
+        head = first + await asyncio.wait_for(self.r.readuntil(b"\r\n\r\n"), timeout=60)
         self.s.pcap_in(head)
         if len(head) > 16384:
             raise ValueError("header too large")
@@ -198,6 +294,10 @@ class RTSPConn:
         except Exception as e:
             self.s.event("malformed", payload=f"{type(e).__name__}: {e}"[:300])
         finally:
+            self.stop_stream()
+            if self.bytes_streamed:
+                self.s.event("stream_bytes", payload=f"{self.bytes_streamed} bytes of H.264 RTP sent",
+                             bytes=self.bytes_streamed)
             if self.playing:
                 v = max(0, int(STATE.field("cctv", "viewers", "1") or 1) - 1)
                 STATE.set("cctv", actor="system", viewers=v)
@@ -206,6 +306,30 @@ class RTSPConn:
                 self.w.close()
             except Exception:
                 pass
+
+    async def stream(self):
+        """Send the CCTV clip as RTP over the RTSP connection, paced at FPS, looping."""
+        if not ACCESS_UNITS:
+            return
+        seq, ts, step = random.randint(0, 30000), random.getrandbits(32), 90000 // FPS
+        t0 = time.time()
+        try:
+            while time.time() - t0 < STREAM_MAX_SECONDS:
+                for au in ACCESS_UNITS:
+                    for k, nal in enumerate(au):
+                        pkts, seq = rtp_packets(nal, seq, ts, self.ssrc, k == len(au) - 1)
+                        for p in pkts:
+                            self.w.write(b"$" + bytes([self.channel]) + len(p).to_bytes(2, "big") + p)
+                            self.bytes_streamed += len(p) + 4
+                    await self.w.drain()
+                    ts += step
+                    await asyncio.sleep(1.0 / FPS)
+        except (ConnectionError, asyncio.CancelledError, OSError):
+            pass
+
+    def stop_stream(self):
+        if self.stream_task and not self.stream_task.done():
+            self.stream_task.cancel()
 
     async def dispatch(self, method, url, path, headers, body, cseq):
         if method == "OPTIONS":
@@ -225,18 +349,21 @@ class RTSPConn:
                        (r != "/" and base_path.startswith(r)) for r in VALID_ROUTES):
                 self.s.event("rtsp_route_probe", payload=path)
                 return self.reply(404, "Stream Not Found", cseq)
-            sdp = SDP_TEMPLATE.format(sess=random.randint(10**9, 10**10))
+            sdp = build_sdp()
             return self.reply(200, "OK", cseq, {"Content-Base": url.rstrip("/") + "/",
                                                 "Content-Type": "application/sdp",
                                                 "x-Accept-Dynamic-Rate": "1"}, sdp)
         if method == "SETUP":
             self.rtsp_session = self.rtsp_session or f"{random.randint(10**8, 10**9)}"
             transport = headers.get("transport", "RTP/AVP;unicast;client_port=5000-5001")
-            if "interleaved" in transport:
-                tr = transport
-            else:
-                tr = transport + f";server_port={random.randrange(30000, 40000, 2)}-" \
-                                 f"{random.randrange(40001, 50000, 2)};ssrc={secrets.token_hex(4).upper()}"
+            if "interleaved" not in transport and "RTP/AVP/TCP" not in transport.upper():
+                # UDP would make the honeypot originate traffic: ask for TCP instead
+                self.s.event("rtsp_request", payload="UDP transport requested -> 461", method="SETUP")
+                return self.reply(461, "Unsupported Transport", cseq,
+                                  {"Session": f"{self.rtsp_session};timeout=60"})
+            m = re.search(r"interleaved=(\d+)", transport)
+            self.channel = int(m.group(1)) if m else 0
+            tr = f"RTP/AVP/TCP;unicast;interleaved={self.channel}-{self.channel + 1};ssrc={self.ssrc:08X}"
             return self.reply(200, "OK", cseq, {"Session": f"{self.rtsp_session};timeout=60",
                                                 "Transport": tr})
         if method == "PLAY":
@@ -245,9 +372,15 @@ class RTSPConn:
                 v = int(STATE.field("cctv", "viewers", "0") or 0) + 1
                 STATE.set("cctv", actor=f"rtsp:{self.ip}", viewers=v)
                 self.s.event("stream_access", payload=url, path=path)
-            return self.reply(200, "OK", cseq, {"Session": self.rtsp_session or "0",
-                                                "Range": "npt=0.000-",
-                                                "RTP-Info": f"url={url}/trackID=0;seq=1;rtptime=0"})
+            self.reply(200, "OK", cseq, {"Session": self.rtsp_session or "0",
+                                         "Range": "npt=0.000-",
+                                         "RTP-Info": f"url={url.rstrip('/')}/trackID=0;seq=0;rtptime=0"})
+            await self.w.drain()
+            if not self.stream_task or self.stream_task.done():
+                self.stream_task = asyncio.ensure_future(self.stream())
+            return None
+        if method in ("PAUSE", "TEARDOWN"):
+            self.stop_stream()
         if method in ("PAUSE", "GET_PARAMETER", "SET_PARAMETER", "TEARDOWN"):
             return self.reply(200, "OK", cseq, {"Session": self.rtsp_session or "0"})
 
@@ -257,6 +390,9 @@ async def handle(reader, writer):
 
 
 async def main():
+    global ACCESS_UNITS, SPS, PPS
+    ACCESS_UNITS, SPS, PPS = load_media()
+    log.info("RTSP media: %d frames from %s", len(ACCESS_UNITS), MEDIA)
     STATE.init_defaults()
     start_heartbeat("rtsp", port=PORT, device=DEVICE, protocol="RTSP")
     server = await asyncio.start_server(handle, "0.0.0.0", PORT, limit=32768)

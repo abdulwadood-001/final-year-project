@@ -7,7 +7,7 @@ exposes:
 
     cctv       RTSP :554            + HTTP/HTTPS :8080/:8443   (Boa camera panel)
     smartlock  SSH :2222 + MQTT :1883 + HTTP :8081            (SecureHome hub)
-    sensor     Telnet :2323 + Modbus :502 + HTTP :8082        (ISN-4000 node)
+    sensor     Telnet :2323 + SSH :2223 + Modbus :502 + HTTP :8082        (ISN-4000 node)
 
 This supervisor launches that device's protocol front-ends as child processes,
 restarts any that crash, reports a per-machine heartbeat, and shuts them all
@@ -46,6 +46,7 @@ SERVICES = {
     ],
     "sensor": [
         ("telnet", "telnet_honeypot.telnet_honeypot", {}),
+        ("ssh", "ssh_honeypot.ssh_honeypot", {"SSH_DEVICE": "sensor", "SSH_PORT": "2223"}),
         ("modbus", "modbus_honeypot.modbus_honeypot", {}),
         ("http", "http_honeypot.http_honeypot", {"HTTP_DEVICES": "sensor"}),
     ],

@@ -11,6 +11,7 @@ loading XGBoost itself. It runs in its own container on the internal backnet.
     POST /classify              → {features:{…}} → class/confidence/probabilities/anomaly/risk
     POST /narrate               → {session:{…}, prediction:{…}, detections:[…]} → narrative
     POST /score_session         → {session:{…}} → classify + narrate in one call
+    POST /flow                  → {windows:[[26 floats]…]} → network-flow IDS labels
 
 No endpoint runs attacker input or opens an outbound connection (the optional
 LLM narrator backend is the only exception, and only when explicitly configured).
@@ -74,6 +75,14 @@ async def score_session(request: Request):
     pred = Predictor.get().predict(session)
     text = narrator.narrate(session, pred, detections)
     return {"prediction": pred, "narrative": text}
+
+
+@app.post("/flow")
+async def flow(request: Request):
+    """Network-flow IDS: classify 1-second traffic windows (26 features each)."""
+    from ml import flow as fl
+    body = await request.json()
+    return {"predictions": fl.predict(body.get("windows", []))}
 
 
 @app.post("/forecast")

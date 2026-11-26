@@ -28,8 +28,9 @@ from common import capture
 from common import realshell
 
 PORT = int(os.environ.get("SSH_PORT", 2222))
-DEVICE = "smartlock"
-KEY_FILE = os.environ.get("SSH_HOST_KEY", "/app/data/ssh_host_rsa_key")
+# which emulated device this SSH service belongs to (smartlock on :2222, sensor on :2223)
+DEVICE = os.environ.get("SSH_DEVICE", "smartlock")
+KEY_FILE = os.environ.get("SSH_HOST_KEY", f"/app/data/ssh_host_rsa_key_{DEVICE}")
 SERVER_VERSION = "SSH-2.0-dropbear_2019.78"
 MAX_CONN_PER_IP = 20
 
@@ -118,9 +119,18 @@ class HoneySSH(paramiko.ServerInterface):
         return False
 
 
+MOTD = {
+    "smartlock": ("\r\nSmartLock-OS 2.1.4 (SL-200)  —  SecureHome Inc.\r\n"
+                  "Firmware build 2021-03-09.  Type 'lockctl help' for device control.\r\n\r\n"),
+    "sensor": ("\r\nISN-4000 Industrial Sensor Node  (fw 1.0.7)\r\n"
+               "Type 'sensorctl' for sensor status and thresholds.\r\n\r\n"),
+    "cctv": ("\r\nIPC-HFW2431S  V5.5.3 build 180512\r\n"
+             "Type 'camctl help' for camera control.\r\n\r\n"),
+}
+
+
 def interactive(chan, shell, session):
-    motd = ("\r\nSmartLock-OS 2.1.4 (SL-200)  —  SecureHome Inc.\r\n"
-            "Firmware build 2021-03-09.  Type 'lockctl help' for device control.\r\n\r\n")
+    motd = MOTD.get(DEVICE, MOTD["smartlock"])
     chan.send(motd.encode())
     chan.send(shell.prompt.encode())
     buf, last = "", ""
@@ -380,12 +390,12 @@ def main():
     global HOST_KEY
     HOST_KEY = get_host_key()
     STATE.init_defaults()
-    start_heartbeat("ssh", port=PORT, device=DEVICE, protocol="SSH")
+    start_heartbeat("ssh" if DEVICE == "smartlock" else f"ssh_{DEVICE}", port=PORT, device=DEVICE, protocol="SSH")
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("0.0.0.0", PORT))
     srv.listen(200)
-    log.info("SSH honeypot (Smart Lock) listening on :%d", PORT)
+    log.info("SSH honeypot (%s) listening on :%d", DEVICE, PORT)
     while True:
         try:
             c, a = srv.accept()

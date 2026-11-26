@@ -162,3 +162,64 @@ def test_forecast_from_series_without_model_uses_trend(monkeypatch):
     out = forecast.forecast_from_series("sensor", series)
     assert out["model"] == "trend" and 0 <= out["risk"] <= 100
     assert out["horizon_hours"] == 24 and isinstance(out["factors"], list)
+
+
+# ── live network-flow IDS (ml/flow.py) ───────────────────────────────────────
+def test_flow_reads_honeypot_pcap_and_builds_windows(pcap_mod):
+    pcap, _ = pcap_mod
+    from ml import flow
+    tap = pcap.PcapTap("55555555-5555-5555-5555-555555555555", "203.0.113.9", 40000, 1502)
+    tap.inbound(b"\x00\x01\x00\x00\x00\x06\x01\x03\x00\x00\x00\x07")
+    tap.outbound(b"\x00\x01\x00\x00\x00\x11\x01\x03\x0e" + b"\x00" * 14)
+    path = tap.flush()
+    pkts = list(flow.read_pcap(path))
+    assert len(pkts) >= 6 and all(p["proto"] == "tcp" for p in pkts)
+    syns = [p for p in pkts if p["flags"] & 0x02 and not p["flags"] & 0x10]
+    assert len(syns) == 1 and syns[0]["dport"] == 1502
+    wins = flow.windows_for(pkts)
+    assert wins and len(wins[0][1]) == len(flow.FLOW_FEATURES)
+
+
+def test_empty_connection_still_recorded(pcap_mod):
+    pcap, _ = pcap_mod
+    tap = pcap.PcapTap("66666666-6666-6666-6666-666666666666", "203.0.113.9", 40001, 2222)
+    assert tap.flush() is not None              # scans/floods are mostly empty connections
+
+
+def test_flow_model_flags_connection_flood():
+    import os
+    from ml import flow
+    if not os.path.exists(flow.MODEL_PATH):
+        import pytest
+        pytest.skip("flow model not present")
+    __import__("pytest").importorskip("xgboost")
+    t, pkts = 1000.0, []
+    for i in range(300):                         # 300 connections inside one second
+        sp = 30000 + i
+        for flags, frm in ((0x02, True), (0x12, False), (0x10, True), (0x11, True), (0x11, False)):
+            pkts.append({"ts": t + i / 400, "length": 54, "proto": "tcp", "flags": flags,
+                         "src": "203.0.113.9" if frm else "172.31.66.10",
+                         "dst": "172.31.66.10" if frm else "203.0.113.9",
+                         "sport": sp if frm else 1502, "dport": 1502 if frm else sp})
+    wins = flow.windows_for(pkts)
+    preds = flow.predict([w for _t, w in wins])
+    assert any(p["label"] == "TCP_BURST" for p in preds)
+
+
+# ── RTSP real video (RFC 6184 packetisation) ─────────────────────────────────
+def test_rtsp_media_and_fua_packetisation():
+    import rtsp_honeypot.rtsp_honeypot as r
+    aus, sps, pps = r.load_media()
+    assert len(aus) > 10 and sps and pps and sps[0] & 0x1F == 7
+    big = bytes([0x65]) + b"\xab" * 4000          # IDR slice larger than the MTU
+    pkts, nxt = r.rtp_packets(big, 100, 9000, 0x1234, True)
+    assert len(pkts) > 1 and nxt == 100 + len(pkts)
+    assert pkts[0][12] & 0x1F == 28 and pkts[0][13] & 0x80          # FU-A, start bit
+    assert pkts[-1][13] & 0x40 and pkts[-1][1] & 0x80                # end bit + RTP marker
+    monkey = (r.SPS, r.PPS)
+    r.SPS, r.PPS = sps, pps
+    try:
+        sdp = r.build_sdp()
+    finally:
+        r.SPS, r.PPS = monkey
+    assert "sprop-parameter-sets=Z" in sdp and "packetization-mode=1" in sdp

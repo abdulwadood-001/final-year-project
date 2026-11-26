@@ -49,7 +49,8 @@ TYPE_TO_CLASS = {
     "CREDENTIAL_COMPROMISE": "brute_force", "TOKEN_BRUTEFORCE": "brute_force",
     # scanning / enumeration
     "RECONNAISSANCE": "port_scan", "WEB_SCAN": "port_scan", "RTSP_ROUTE_ENUM": "port_scan",
-    "ICS_DEVICE_SCAN": "port_scan",
+    "ICS_DEVICE_SCAN": "port_scan", "FLOW_PORT_SCAN": "port_scan",
+    "FLOW_FLOOD": "botnet_c2",
 }
 
 FEATURE_SQL = """

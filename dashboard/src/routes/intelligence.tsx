@@ -17,6 +17,7 @@ import {
   useMlForecast,
   useMlPredictions,
   useMlPrediction,
+  useMlFlow,
   shortId,
 } from "@/lib/api";
 import { pageHead } from "@/lib/head";
@@ -52,6 +53,7 @@ function Intelligence() {
   const preds = useMlPredictions(0);
   const [openSession, setOpenSession] = useState<string | null>(null);
   const detail = useMlPrediction(openSession);
+  const flow = useMlFlow();
 
   const cv = model.data?.cv;
 
@@ -178,6 +180,57 @@ function Intelligence() {
           </QueryState>
         </Panel>
       </div>
+
+      {/* network-flow IDS (multi-protocol IoT traffic model) */}
+      <Panel
+        title="Network-flow IDS"
+        subtitle="1-second traffic windows from the honeypot's own PCAPs, classified by the IoT flow model."
+      >
+        <QueryState q={flow}>
+          {(f) => (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {f.summary.map((s) => (
+                  <Tag key={s.label}>
+                    {s.label}: {s.windows} windows · {s.ips} IPs
+                  </Tag>
+                ))}
+              </div>
+              {f.recent.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No scan or flood windows detected yet.
+                </p>
+              ) : (
+                <DataTable
+                  head={
+                    <>
+                      <TH>Window</TH>
+                      <TH>Label</TH>
+                      <TH>Conf.</TH>
+                      <TH>IP</TH>
+                      <TH>Device</TH>
+                    </>
+                  }
+                >
+                  {f.recent.slice(0, 20).map((r, i) => (
+                    <tr key={i} className="border-t border-border">
+                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                        {timeAgo(r.window_start)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <Tag>{r.label}</Tag>
+                      </td>
+                      <td className="px-3 py-2">{(r.confidence * 100).toFixed(0)}%</td>
+                      <td className="px-3 py-2 font-mono text-xs">{r.ip}</td>
+                      <td className="px-3 py-2 capitalize">{r.device ?? "—"}</td>
+                    </tr>
+                  ))}
+                </DataTable>
+              )}
+            </div>
+          )}
+        </QueryState>
+      </Panel>
 
       {/* classified sessions + narrative drawer */}
       <Panel

@@ -497,6 +497,23 @@ export type MlForecast = {
   updated_at: string;
 };
 
+export type MlFlow = {
+  summary: { label: string; windows: number; ips: number; avg_conf: number }[];
+  recent: {
+    ip: string;
+    device: string | null;
+    window_start: string;
+    label: string;
+    confidence: number;
+  }[];
+};
+export const useMlFlow = () =>
+  useQuery({
+    queryKey: ["ml-flow"],
+    queryFn: () => api<MlFlow>("/ml/flow"),
+    refetchInterval: 30_000,
+  });
+
 export const useMlModel = () =>
   useQuery({
     queryKey: ["ml-model"],

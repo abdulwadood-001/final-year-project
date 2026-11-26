@@ -95,6 +95,11 @@ def run_once():
     except Exception as e:
         log.error("YARA scan failed: %s", e)
     dets = rules.run_rules()
+    try:                                    # Module 8: network-flow IDS on the honeypot's own PCAPs
+        from ml import flow
+        dets += flow.score_pending()
+    except Exception as e:
+        log.error("flow IDS failed: %s", e)
     new = store(dets)
     publish(new)
     try:

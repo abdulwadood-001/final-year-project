@@ -50,6 +50,7 @@ NAMES = {
     "T1134":     "Access Token Manipulation",
     "T1136":     "Create Account",
     "T1552":     "Unsecured Credentials",
+    "T1498":     "Network Denial of Service",
     # ICS
     "T0812": "ICS: Default Credentials",
     "T0855": "ICS: Unauthorized Command Message",
@@ -100,6 +101,8 @@ TECHNIQUES_BY_TYPE = {
     "UNAUTHORIZED_ACCESS_GRANT": ["T1136", "T1098", "T0859"],
     "TOKEN_REPLAY":            ["T1134", "T1078.001", "T0859"],
     "TOKEN_BRUTEFORCE":        ["T1110", "T1552"],
+    "FLOW_PORT_SCAN":          ["T1046", "T0846"],
+    "FLOW_FLOOD":              ["T1498", "T0814"],
 }
 
 COMMAND_RULES = [

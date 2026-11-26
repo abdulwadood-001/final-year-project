@@ -120,6 +120,7 @@ class PcapTap:
         self.server_port = int(server_port or 0) & 0xFFFF
         self.device, self.protocol = device, protocol
         self.frames = []                     # (ts, from_client: bool, data)
+        self.t_start = time.time()           # connection time (handshake timestamp)
         self.total = 0
         self.truncated = False
         self._lock = threading.Lock()
@@ -151,7 +152,7 @@ class PcapTap:
         cli_ip, srv_ip = _ip_to_bytes(self.client_ip), _ip_to_bytes(_SRV_IP)
         cseq = ssq = 1
         ident = 1
-        t0 = self.frames[0][0] if self.frames else time.time()
+        t0 = self.frames[0][0] if self.frames else self.t_start
 
         def eth(from_client, ip_payload):
             dst, src = (_SRV_MAC, _CLI_MAC) if from_client else (_CLI_MAC, _SRV_MAC)
@@ -184,7 +185,7 @@ class PcapTap:
                 else:
                     ssq += len(chunk)
 
-        tn = self.frames[-1][0] if self.frames else t0
+        tn = self.frames[-1][0] if self.frames else t0 + 0.001
         yield seg(tn, True, 0x11)                         # FIN|ACK (client)
         cseq += 1
         yield seg(tn, False, 0x11)                        # FIN|ACK (server)
@@ -192,8 +193,10 @@ class PcapTap:
         yield seg(tn, True, 0x10)                         # ACK
 
     def flush(self):
-        """Write the .pcap file. Returns its path, or None when nothing was captured."""
-        if not PCAP_ENABLED or not self.frames:
+        """Write the .pcap file. Returns its path. A connection that sent no data is still
+        written (handshake + teardown only) — a real network tap would see it too, and
+        scans / connection floods consist mostly of exactly such connections."""
+        if not PCAP_ENABLED:
             return None
         try:
             os.makedirs(PCAP_DIR, exist_ok=True)

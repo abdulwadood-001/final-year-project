@@ -212,6 +212,20 @@ CREATE TABLE IF NOT EXISTS pcap_files (
     captured_at  TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_pcap_ip ON pcap_files(ip);
+ALTER TABLE pcap_files ADD COLUMN IF NOT EXISTS flow_scored BOOLEAN DEFAULT FALSE;
+
+-- ── Module 8: network-flow IDS verdicts per 1-s traffic window (ml/flow.py) ──
+CREATE TABLE IF NOT EXISTS flow_detections (
+    id           BIGSERIAL PRIMARY KEY,
+    ip           TEXT,
+    device       TEXT,
+    window_start TIMESTAMPTZ,
+    label        TEXT,               -- BENIGN | PORT_SCAN | TCP_BURST | UDP_BURST
+    confidence   REAL,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_flow_det_ip ON flow_detections(ip);
+CREATE INDEX IF NOT EXISTS idx_flow_det_label ON flow_detections(label);
 
 -- ── Module 8 (AI): per-session classifier / anomaly / risk results ──────────
 CREATE TABLE IF NOT EXISTS ml_predictions (

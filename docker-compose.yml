@@ -7,7 +7,7 @@
 #
 #    cctv-machine       RTSP :554 · HTTP/HTTPS :8080/:8443        (Boa IP camera)
 #    smartlock-machine  SSH :2222 · MQTT :1883 · HTTP :8081       (SecureHome hub)
-#    sensor-machine     Telnet :2323 · Modbus :502 · HTTP :8082   (ISN-4000 node)
+#    sensor-machine     Telnet :2323 · SSH :2223 · Modbus :502 · HTTP :8082   (ISN-4000 node)
 #
 #  On a successful SSH/Telnet login the attacker gets a REAL but heavily
 #  restricted BusyBox shell: the `sandbox` service starts a throw-away device
@@ -219,7 +219,7 @@ services:
       SANDBOX_HOST: sandbox
       SANDBOX_IPC_DIR: /run/vm-ipc
       MODBUS_PORT: 1502             # unprivileged inside the container (cap_drop ALL)
-    ports: ["2323:2323", "502:1502", "8082:8082"]
+    ports: ["2323:2323", "2223:2223", "502:1502", "8082:8082"]
 
   # ── API (REST + WebSocket) and threat-intelligence engine ─────────────────
   api:
