@@ -1,6 +1,13 @@
 -r requirements-api.txt
 -r requirements-honeypot.txt
--r requirements-ml.txt
+# Module 8 test deps. TensorFlow (ml/forecast LSTM) is intentionally NOT installed
+# here: the forecast tests exercise the trend fallback, so the suite stays light.
+# The ml_api image installs the full requirements-ml.txt (incl. tensorflow-cpu).
+xgboost==3.0.0
+scikit-learn==1.5.2
+numpy==1.26.4
+joblib==1.4.2
+scapy==2.5.0
 pytest==8.1.1
 httpx==0.27.0
 bandit==1.7.8
