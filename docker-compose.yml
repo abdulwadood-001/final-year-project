@@ -361,4 +361,5 @@ services:
               "--host", "smartlock-machine", "--telnet-host", "sensor-machine",
               "--mqtt-host", "smartlock-machine", "--rtsp-host", "cctv-machine",
               "--http-host", "cctv-machine", "--lock-host", "smartlock-machine",
-              "--sensor-host", "sensor-machine", "--modbus-host", "sensor-machine"]
+              "--sensor-host", "sensor-machine", "--modbus-host", "sensor-machine",
+              "--modbus-port", "1502"]     # in-network port (published as :502 on the host)

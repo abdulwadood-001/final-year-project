@@ -170,7 +170,7 @@ function StatusFooter() {
             : `${up}/${total} services online`}
       </div>
       <p className="font-mono text-[10px] text-muted-foreground/60">
-        milestone 70% · v{stats.data?.version ?? "0.7"}
+        HoneyBot-IoT · v{stats.data?.version ?? "0.8"}
       </p>
     </div>
   );

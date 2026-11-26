@@ -30,7 +30,7 @@ function Sessions() {
     <div className="bg-grid min-h-screen p-4 md:p-6">
       <PageHeader
         title="Sessions"
-        subtitle="One row per attacker connection, across all five protocols"
+        subtitle="One row per attacker connection, across all six protocols"
       />
 
       <Panel

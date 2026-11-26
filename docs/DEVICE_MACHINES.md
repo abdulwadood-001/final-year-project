@@ -23,7 +23,7 @@ restarts any that crash:
 |---|---|---|
 | `cctv-machine` | IPC-HFW2431S | RTSP :554 · HTTP/HTTPS :8080/:8443 |
 | `smartlock-machine` | smartlock | SSH :2222 · MQTT :1883 · HTTP :8081 |
-| `sensor-machine` | sensor-node | Telnet :2323 · Modbus :502 · HTTP :8082 |
+| `sensor-machine` | sensor-node | Telnet :2323 · SSH :2223 · Modbus :502 · HTTP :8082 |
 
 The device-state manager and the shared Redis/Postgres data plane are unchanged, so a
 change made on one protocol is still seen on all the others.

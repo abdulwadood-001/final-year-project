@@ -39,9 +39,9 @@ its own protocols:
 
 | Device machine | Protocols | What attackers get |
 |---|---|---|
-| CCTV camera (IPC-HFW2431S) | RTSP :554, HTTP :8080 / HTTPS :8443 | Boa web panel with login, live view and firmware upload; RTSP Basic and Digest auth with a valid H.264 SDP; **real IoT CVE endpoints** |
+| CCTV camera (IPC-HFW2431S) | RTSP :554, HTTP :8080 / HTTPS :8443 | Boa web panel with login, live view and firmware upload; RTSP Basic and Digest auth, then a **real H.264 video stream** (RTP interleaved over TCP); **real IoT CVE endpoints** |
 | Smart lock (SL-200) | SSH :2222, HTTP REST :8081, MQTT :1883 | **Real restricted BusyBox shell** with `lockctl`; token REST API; `lock/cmd` topic. Unlocking on one protocol is visible on all |
-| Industrial sensor (ISN-4000) | Telnet :2323, Modbus/TCP :502, MQTT :1883, HTTP HMI :8082 | **Real restricted BusyBox shell** with `sensorctl`; live telemetry; writable alarm thresholds, also over Modbus registers |
+| Industrial sensor (ISN-4000) | Telnet :2323, SSH :2223, Modbus/TCP :502, MQTT :1883, HTTP HMI :8082 | **Real restricted BusyBox shell** with `sensorctl`; live telemetry; writable alarm thresholds, also over Modbus registers |
 
 On a successful SSH/Telnet login the attacker gets a **real but heavily restricted shell** in
 a throw-away device container (no network, read-only root, CPU/memory/process/time limits,

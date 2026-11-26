@@ -77,11 +77,26 @@ function Intelligence() {
           ) : (
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
               <StatCard label="Model" value={m.version ?? "xgboost"} />
-              <StatCard
-                label="CV accuracy"
-                value={cv ? `${(cv.accuracy_mean * 100).toFixed(1)}%` : "—"}
-                hint={cv ? `±${(cv.accuracy_std * 100).toFixed(1)}% · ${cv.folds}-fold` : ""}
-              />
+              {cv ? (
+                <StatCard
+                  label="CV accuracy"
+                  value={`${(cv.accuracy_mean * 100).toFixed(1)}%`}
+                  hint={`±${(cv.accuracy_std * 100).toFixed(1)}% · ${cv.folds}-fold`}
+                />
+              ) : m.live_eval ? (
+                <StatCard
+                  label="Live held-out accuracy"
+                  value={`${(m.live_eval.with_live.accuracy * 100).toFixed(1)}%`}
+                  hint={`unseen honeypot run · ${m.live_eval.with_live.n_test} sessions`}
+                />
+              ) : (
+                <StatCard
+                  label="Held-out accuracy"
+                  value={
+                    m.heldout_accuracy != null ? `${(m.heldout_accuracy * 100).toFixed(1)}%` : "—"
+                  }
+                />
+              )}
               <StatCard label="Training sessions" value={m.n_samples?.toLocaleString() ?? "—"} />
               <StatCard label="Classes" value={m.classes?.length ?? 6} />
             </div>

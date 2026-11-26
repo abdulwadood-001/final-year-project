@@ -37,7 +37,7 @@ from common.schema import ensure_schema
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("api")
 
-VERSION = "0.7"
+VERSION = "0.8"
 
 
 @asynccontextmanager
@@ -50,7 +50,7 @@ async def lifespan(_app):
 app = FastAPI(title="HoneyBot-IoT API", version=VERSION, lifespan=lifespan,
               description="Threat-intelligence API of the HoneyBot-IoT multi-protocol IoT honeypot.")
 
-PROTOCOLS = ["SSH", "Telnet", "HTTP", "MQTT", "RTSP"]
+PROTOCOLS = ["SSH", "Telnet", "HTTP", "MQTT", "RTSP", "Modbus"]
 ACTIVITY = ("auth", "command", "http_request", "mqtt_publish", "mqtt_subscribe", "rtsp_request",
             "download_attempt", "state_change", "malformed", "file_write", "file_upload", "file_capture",
             "exec_attempt", "stream_access")

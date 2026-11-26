@@ -35,7 +35,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ── models (mirror the SQL in api/api.py) ───────────────────────────────────
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
-export const PROTOCOLS = ["SSH", "Telnet", "HTTP", "MQTT", "RTSP"] as const;
+export const PROTOCOLS = ["SSH", "Telnet", "HTTP", "MQTT", "RTSP", "Modbus"] as const;
 
 export type Stats = {
   version: string;
@@ -100,7 +100,7 @@ export type Attacker = {
 };
 
 export type TimelinePoint = { hour: string } & Record<
-  "ssh" | "telnet" | "http" | "mqtt" | "rtsp",
+  "ssh" | "telnet" | "http" | "mqtt" | "rtsp" | "modbus",
   number
 >;
 
@@ -462,6 +462,8 @@ export type MlModel = {
     confusion_labels: string[];
   };
   top_features?: Record<string, number>;
+  heldout_accuracy?: number;
+  live_eval?: { with_live: { accuracy: number; macro_f1: number; n_test: number } };
 };
 export type MlPrediction = {
   session_id: string;

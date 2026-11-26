@@ -6,9 +6,9 @@ to its implementation, so an evaluator can check each item against runnable code
 ## Module 1 — IoT Device Emulation
 | Scope item | Status | Where |
 |---|---|---|
-| CCTV camera emulator (RTSP + HTTP panel, firmware banner, motion→MQTT) | ✅ | `rtsp_honeypot/`, `http_honeypot/` (cctv app), `device_state/` |
+| CCTV camera emulator (RTSP with a **real H.264 video stream**, HTTP panel, firmware banner, motion→MQTT) | ✅ | `rtsp_honeypot/` (+ `media/cctv.h264`), `http_honeypot/` (cctv app), `device_state/` |
 | Smart lock emulator (SSH/Telnet shell, REST API, MQTT control) | ✅ | `ssh_honeypot/`, `http_honeypot/` (lock app), `mqtt_honeypot/` |
-| Industrial sensor emulator (MQTT telemetry, HTTP HMI, Telnet, thresholds) | ✅ | `telnet_honeypot/`, `http_honeypot/` (sensor app), `modbus_honeypot/` |
+| Industrial sensor emulator (MQTT telemetry, HTTP HMI, Telnet + SSH, Modbus, thresholds) | ✅ | `telnet_honeypot/`, `ssh_honeypot/` (`SSH_DEVICE=sensor`, port 2223), `http_honeypot/` (sensor app), `modbus_honeypot/` |
 | Device State Manager (shared state across protocols) | ✅ | `device_state/`, `common/state.py` |
 | **Each device as its own machine** (own hostname/IP/MAC) | ✅ (v0.8) | `device_machine.py`, `docker-compose.yml` |
 | **Real restricted shell on login** | ✅ (v0.8) | `sandbox/`, `common/realshell.py`, `vm/` |
@@ -75,15 +75,37 @@ to its implementation, so an evaluator can check each item against runnable code
 | FE-3 LLM threat narrator (template / GPT-4o / Ollama) | ✅ | `ml/narrator.py` |
 | FE-4 Predictive threat scoring (LSTM, per device, 24 h) | ✅ | `ml/forecast.py` |
 | ML serving microservice (FastAPI `ml_api`) | ✅ | `ml/ml_api.py`, `Dockerfile.ml` |
-| Feature store / dataset | ✅ | `ml/features.py`, `/api/ml/dataset.csv` |
+| Feature store / dataset (real Cowrie honeynet + IoT-IDS Lab + live) | ✅ | `ml/features.py`, `ml/datasets/`, `/api/ml/dataset.csv` |
+| Network-flow IDS on live PCAPs (all protocols) | ✅ | `ml/flow.py`, `ml/iot_flow/`, `/api/ml/flow` |
+| Evaluation: temporal split, unseen live honeypot run (91.7 %), ablation | ✅ | `docs/MODEL_EVALUATION.md`, `ml/artifacts/ablation.json` |
 
 ## Constraints honoured
-- **LI-6** classifier accuracy grows with live data — synthetic baseline documented honestly (`docs/MODEL_CARD.md`).
+- **LI-6** classifier trained on real internet data (CyberLab Cowrie, IoT-IDS Lab); the two IoT-only classes still rely on synthetic + live data — documented in `docs/MODEL_EVALUATION.md`.
 - **LI-7** offline operation — template narrator and trend forecaster need no network; GreyNoise/LLM are opt-in.
 - **LI-8** no physical-proximity attacks (Bluetooth/NFC) — out of scope.
 - **LI-9** biometric / smart-bulb devices — deferred, not added.
 - **LI-11** research lab only — isolation enforced, passive capture, samples never executed.
 
+## Honest caveats (not gaps in scope, but worth stating in the viva)
+- Device "machines" are hardened containers (own hostname/IP/MAC, per-session throw-away
+  BusyBox machine), not hypervisor VMs — the approved scope (Module 7) specifies Docker.
+- Slack, Telegram, GreyNoise and OpenAI paths are unit-tested with mocked endpoints; they need
+  your own keys/webhooks to run live.
+- The sandbox service holds the Docker socket to start per-session machines; it is isolated on
+  an internal network and never exposed to attackers.
+- Slow port sweeps are detected by the rule engine; the flow model alerts on normal-speed scans
+  and floods (see `docs/MODEL_EVALUATION.md`).
+- Session classifier: 91.7 % on an unseen live run of our own honeypot; it only reached 36.5 %
+  before our own live data was added to training. Re-measure after internet deployment.
+
 Every item in the approved scope is implemented and covered by automated tests
 (`pytest`, `npm test`) and the end-to-end Docker run (`docs/TEST_REPORT.md`,
 `docs/DEVICE_MACHINES.md`, `docs/MODULE8_AI.md`).
+
+## End-to-end verification (full `docker compose` stack)
+All 13 services (including the outbound-isolation firewall) were built and started with
+`docker compose up`, then attacked with the simulator — 80 attacker containers, each with its
+own source IP — across all 16 scenarios. Result: 240 sessions on all 6 protocols, 245
+detections of 30 attack types, AI scoring of every session, LSTM risk per device, a live
+`FLOW_PORT_SCAN`/`FLOW_FLOOD` from the flow IDS, and every dashboard page loading with no
+console errors. Screenshots: `docs/screenshots/`.
