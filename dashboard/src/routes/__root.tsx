@@ -12,6 +12,7 @@ import {
 import {
   Activity,
   Bug,
+  BrainCircuit,
   Crosshair,
   FileText,
   Fingerprint,
@@ -32,6 +33,7 @@ const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard },
   { to: "/attackers", label: "Attackers", icon: Crosshair },
   { to: "/detections", label: "Detections", icon: ShieldAlert },
+  { to: "/intelligence", label: "AI Intelligence", icon: BrainCircuit },
   { to: "/devices", label: "Devices", icon: MonitorSmartphone },
   { to: "/sessions", label: "Sessions", icon: ScrollText },
   { to: "/malware", label: "Malware", icon: Bug },

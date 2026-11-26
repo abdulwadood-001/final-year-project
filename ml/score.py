@@ -96,3 +96,28 @@ def score_pending(limit=SCORE_LIMIT):
     if scored:
         log.info("AI-scored %d session(s)", scored)
     return scored
+
+
+def forecast_devices():
+    """M8-FE-4: build each device's hourly series, ask ml_api for the LSTM 24h risk
+    forecast, and upsert device_risk. Returns the number of devices forecast."""
+    from ml.forecast import device_series, DEVICES
+    if not _ml_api_ready():
+        return 0
+    n = 0
+    for device in DEVICES:
+        try:
+            series = device_series(device)
+            res = _post("/forecast", {"device": device, "series": series})
+        except Exception as e:
+            log.warning("forecast %s failed: %s", device, e)
+            continue
+        execute("""
+            INSERT INTO device_risk (device, risk, horizon_hours, model, factors, updated_at)
+            VALUES (%s,%s,%s,%s,%s::jsonb,NOW())
+            ON CONFLICT (device) DO UPDATE SET risk=EXCLUDED.risk, horizon_hours=EXCLUDED.horizon_hours,
+                model=EXCLUDED.model, factors=EXCLUDED.factors, updated_at=NOW()
+        """, (device, res.get("risk"), res.get("horizon_hours", 24), res.get("model"),
+              json.dumps(res.get("factors", []))))
+        n += 1
+    return n

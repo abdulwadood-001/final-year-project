@@ -76,6 +76,17 @@ async def score_session(request: Request):
     return {"prediction": pred, "narrative": text}
 
 
+@app.post("/forecast")
+async def forecast(request: Request):
+    """Predictive threat scoring (M8-FE-4): the caller supplies a device's hourly feature
+    series; the LSTM (or the trend fallback) returns the 24-hour escalation risk."""
+    from ml import forecast as fc
+    body = await request.json()
+    device = body.get("device", "device")
+    series = body.get("series", [])
+    return fc.forecast_from_series(device, series)
+
+
 def _train_if_missing():
     """Self-contained demo: if no model has been trained yet, train one on synthetic
     data so the service is useful on first boot (live data refines it via `python -m
@@ -90,6 +101,12 @@ def _train_if_missing():
         Predictor._instance = None          # force reload
     except Exception as e:
         log.error("auto-train failed: %s", e)
+    try:                                    # M8-FE-4: train the LSTM forecaster too
+        from ml import forecast as fc
+        if not os.path.exists(fc.LSTM_PATH):
+            fc.train()
+    except Exception as e:
+        log.error("forecast auto-train failed: %s", e)
 
 
 def main():

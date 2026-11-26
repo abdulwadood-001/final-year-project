@@ -114,3 +114,51 @@ def test_recording_socket_taps_both_directions(pcap_mod):
     rs.sendall(b"outbound-bytes")
     dirs = [fc for _ts, fc, _d in tap.frames]
     assert True in dirs and False in dirs             # both directions recorded
+
+
+# ── M4: GreyNoise reputation ─────────────────────────────────────────────────
+def test_reputation_disabled_without_key(monkeypatch):
+    monkeypatch.delenv("GREYNOISE_API_KEY", raising=False)
+    import importlib
+    from intel import reputation
+    importlib.reload(reputation)
+    assert reputation.lookup("8.8.8.8") == {"reputation_source": "disabled"}
+
+
+def test_reputation_never_queries_private_ips(monkeypatch):
+    monkeypatch.setenv("GREYNOISE_API_KEY", "dummy")
+    import importlib, urllib.request
+    from intel import reputation
+    importlib.reload(reputation)
+
+    def boom(*a, **k):
+        raise AssertionError("must not contact GreyNoise for a private IP")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    out = reputation.lookup("192.168.1.50")
+    assert out["reputation_source"] == "disabled" and out["reputation"] == "benign"
+
+
+# ── M8-FE-4: predictive forecast (trend fallback, no TensorFlow needed) ──────
+def test_forecast_trend_rises_with_escalation():
+    from ml import forecast
+    quiet = [{f: 0 for f in forecast.FEATS} for _ in range(forecast.WINDOW)]
+    esc = [{f: 0 for f in forecast.FEATS} for _ in range(forecast.WINDOW)]
+    for i, r in enumerate(esc):
+        r["events"] = i * 2
+        r["downloads"] = max(0, i - 18)
+        r["det_weight"] = max(0, i - 16) * 6
+        r["commands"] = i
+    rq, _ = forecast._trend_forecast(quiet)
+    re_, factors = forecast._trend_forecast(esc)
+    assert re_ > rq and re_ > 40
+    assert any("rise" in f or "download" in f for f in factors)
+
+
+def test_forecast_from_series_without_model_uses_trend(monkeypatch):
+    from ml import forecast
+    monkeypatch.setattr(forecast, "_load", lambda: None)
+    series = [{f: 1 for f in forecast.FEATS} for _ in range(forecast.WINDOW)]
+    out = forecast.forecast_from_series("sensor", series)
+    assert out["model"] == "trend" and 0 <= out["risk"] <= 100
+    assert out["horizon_hours"] == 24 and isinstance(out["factors"], list)

@@ -174,3 +174,9 @@ def run():
     update_attackers()
     update_campaigns()
     extract_iocs()
+    try:                                    # M4: external GreyNoise reputation (optional)
+        from intel import reputation
+        reputation.enrich_pending()
+    except Exception as e:
+        import logging
+        logging.getLogger("correlate").error("reputation enrichment failed: %s", e)

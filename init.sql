@@ -86,8 +86,21 @@ CREATE TABLE IF NOT EXISTS attackers (
     threat_level  TEXT     DEFAULT 'LOW',
     threat_score  INTEGER  DEFAULT 0,
     attack_types  TEXT[]   DEFAULT '{}',
+    reputation        TEXT,              -- M4 GreyNoise: malicious | benign | unknown
+    reputation_name   TEXT,              -- actor / tag, e.g. "Mirai", "Censys"
+    reputation_noise  BOOLEAN,           -- seen scanning the internet (GreyNoise "noise")
+    reputation_riot   BOOLEAN,           -- known-benign common service (GreyNoise "RIOT")
+    reputation_source TEXT,              -- greynoise | unavailable | disabled
+    reputation_checked_at TIMESTAMPTZ,
     updated_at    TIMESTAMPTZ DEFAULT NOW()
 );
+-- in-place migration for databases created before the reputation columns existed
+ALTER TABLE attackers ADD COLUMN IF NOT EXISTS reputation        TEXT;
+ALTER TABLE attackers ADD COLUMN IF NOT EXISTS reputation_name   TEXT;
+ALTER TABLE attackers ADD COLUMN IF NOT EXISTS reputation_noise  BOOLEAN;
+ALTER TABLE attackers ADD COLUMN IF NOT EXISTS reputation_riot   BOOLEAN;
+ALTER TABLE attackers ADD COLUMN IF NOT EXISTS reputation_source TEXT;
+ALTER TABLE attackers ADD COLUMN IF NOT EXISTS reputation_checked_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS campaigns (
     campaign_id  TEXT PRIMARY KEY,
@@ -218,6 +231,16 @@ CREATE TABLE IF NOT EXISTS ml_predictions (
 CREATE INDEX IF NOT EXISTS idx_ml_pred_class ON ml_predictions(ml_class);
 CREATE INDEX IF NOT EXISTS idx_ml_pred_risk ON ml_predictions(risk);
 CREATE INDEX IF NOT EXISTS idx_ml_pred_device ON ml_predictions(device);
+
+-- ── Module 8 (M8-FE-4): per-device 24h predictive risk (LSTM forecaster) ────
+CREATE TABLE IF NOT EXISTS device_risk (
+    device        TEXT PRIMARY KEY,
+    risk          REAL,
+    horizon_hours INTEGER DEFAULT 24,
+    model         TEXT,                -- lstm | trend
+    factors       JSONB,
+    updated_at    TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- ── Backwards-compatible views (old per-protocol tables) ────────────────────
 CREATE OR REPLACE VIEW ssh_attempts AS

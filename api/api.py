@@ -598,6 +598,14 @@ def ml_prediction_detail(session_id: str):
     return rows[0]
 
 
+@app.get("/api/ml/forecast")
+def ml_forecast():
+    """Per-device 24-hour predictive escalation risk (M8-FE-4, LSTM) with factor breakdown."""
+    return _iso(fetchdicts("""
+        SELECT device, risk, horizon_hours, model, factors, updated_at
+        FROM device_risk ORDER BY risk DESC"""))
+
+
 @app.get("/api/ml/risk")
 def ml_risk():
     """AI risk overview the dashboard shows: class distribution and per-device risk."""

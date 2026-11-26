@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DetectionsRouteImport } from './routes/detections'
+import { Route as IntelligenceRouteImport } from './routes/intelligence'
 import { Route as IocsRouteImport } from './routes/iocs'
 import { Route as MalwareRouteImport } from './routes/malware'
 import { Route as ReportsRouteImport } from './routes/reports'
@@ -30,6 +31,11 @@ const IndexRoute = IndexRouteImport.update({
 const DetectionsRoute = DetectionsRouteImport.update({
   id: '/detections',
   path: '/detections',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IntelligenceRoute = IntelligenceRouteImport.update({
+  id: '/intelligence',
+  path: '/intelligence',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IocsRoute = IocsRouteImport.update({
@@ -86,6 +92,7 @@ const SessionsSessionIdRoute = SessionsSessionIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/detections': typeof DetectionsRoute
+  '/intelligence': typeof IntelligenceRoute
   '/iocs': typeof IocsRoute
   '/malware': typeof MalwareRoute
   '/reports': typeof ReportsRoute
@@ -100,6 +107,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/detections': typeof DetectionsRoute
+  '/intelligence': typeof IntelligenceRoute
   '/iocs': typeof IocsRoute
   '/malware': typeof MalwareRoute
   '/reports': typeof ReportsRoute
@@ -115,6 +123,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/detections': typeof DetectionsRoute
+  '/intelligence': typeof IntelligenceRoute
   '/iocs': typeof IocsRoute
   '/malware': typeof MalwareRoute
   '/reports': typeof ReportsRoute
@@ -131,6 +140,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/detections'
+    | '/intelligence'
     | '/iocs'
     | '/malware'
     | '/reports'
@@ -145,6 +155,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/detections'
+    | '/intelligence'
     | '/iocs'
     | '/malware'
     | '/reports'
@@ -159,6 +170,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/detections'
+    | '/intelligence'
     | '/iocs'
     | '/malware'
     | '/reports'
@@ -174,6 +186,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DetectionsRoute: typeof DetectionsRoute
+  IntelligenceRoute: typeof IntelligenceRoute
   IocsRoute: typeof IocsRoute
   MalwareRoute: typeof MalwareRoute
   ReportsRoute: typeof ReportsRoute
@@ -200,6 +213,13 @@ declare module '@tanstack/react-router' {
       path: '/detections'
       fullPath: '/detections'
       preLoaderRoute: typeof DetectionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/intelligence': {
+      id: '/intelligence'
+      path: '/intelligence'
+      fullPath: '/intelligence'
+      preLoaderRoute: typeof IntelligenceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/iocs': {
@@ -278,6 +298,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DetectionsRoute: DetectionsRoute,
+  IntelligenceRoute: IntelligenceRoute,
   IocsRoute: IocsRoute,
   MalwareRoute: MalwareRoute,
   ReportsRoute: ReportsRoute,

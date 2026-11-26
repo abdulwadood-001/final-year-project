@@ -444,6 +444,71 @@ export const useMlSummary = () =>
     queryFn: () => api<MlSummary>("/ml/summary"),
     refetchInterval: 60_000,
   });
+
+// ── Module 8: AI classifier / anomaly / risk / forecast ──────────────────────
+export type MlModel = {
+  trained: boolean;
+  hint?: string;
+  version?: string;
+  classes?: string[];
+  n_samples?: number;
+  class_counts?: Record<string, number>;
+  cv?: {
+    accuracy_mean: number;
+    accuracy_std: number;
+    folds: number;
+    per_class: Record<string, { precision: number; recall: number; f1: number }>;
+    confusion_matrix: number[][];
+    confusion_labels: string[];
+  };
+  top_features?: Record<string, number>;
+};
+export type MlPrediction = {
+  session_id: string;
+  ip: string;
+  device: string | null;
+  protocol: string | null;
+  ml_class: string;
+  confidence: number;
+  anomaly: number;
+  risk: number;
+  probabilities: Record<string, number>;
+  model_version: string | null;
+  narrative?: string | null;
+  predicted_at: string;
+};
+export type MlRisk = {
+  by_class: { ml_class: string; n: number; avg_risk: number }[];
+  by_device: { device: string; avg_risk: number; max_risk: number; high_risk_sessions: number; sessions: number }[];
+  top_risk: { ip: string; device: string; ml_class: string; risk: number; predicted_at: string }[];
+};
+export type MlForecast = {
+  device: string;
+  risk: number;
+  horizon_hours: number;
+  model: string;
+  factors: string[];
+  updated_at: string;
+};
+
+export const useMlModel = () =>
+  useQuery({ queryKey: ["ml-model"], queryFn: () => api<MlModel>("/ml/model"), refetchInterval: 120_000 });
+export const useMlRisk = () =>
+  useQuery({ queryKey: ["ml-risk"], queryFn: () => api<MlRisk>("/ml/risk"), refetchInterval: 30_000 });
+export const useMlForecast = () =>
+  useQuery({ queryKey: ["ml-forecast"], queryFn: () => api<MlForecast[]>("/ml/forecast"), refetchInterval: 60_000 });
+export const useMlPredictions = (minRisk = 0) =>
+  useQuery({
+    queryKey: ["ml-predictions", minRisk],
+    queryFn: () => api<MlPrediction[]>(`/ml/predictions?min_risk=${minRisk}&limit=50`),
+    refetchInterval: 30_000,
+  });
+export const useMlPrediction = (sessionId: string | null) =>
+  useQuery({
+    queryKey: ["ml-prediction", sessionId],
+    queryFn: () => api<MlPrediction>(`/ml/predictions/${sessionId}`),
+    enabled: !!sessionId,
+  });
 export const useSearch = (q: string) =>
   useQuery({
     queryKey: ["search", q],

@@ -113,6 +113,7 @@ def run_once():
     try:                                    # Module 8: classify + narrate finished sessions
         from ml import score
         ai_scored = score.score_pending()
+        score.forecast_devices()            # M8-FE-4: per-device 24h LSTM risk forecast
     except Exception as e:
         log.error("AI scoring failed: %s", e)
     try:
