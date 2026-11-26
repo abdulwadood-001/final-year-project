@@ -56,6 +56,27 @@ the real 7-day honeynet data. Held-out 20 % = 1 720 sessions:
 
 The LSTM forecaster reaches **val MAE ≈ 4.2 / 100** (escalating device → ~89, quiet → ~8).
 
+## Complementary flow-based IoT IDS (all-protocol network data)
+
+Because SSH/Telnet honeypot logs don't cover every protocol, a second, **network-flow**
+classifier is trained on real multi-protocol IoT traffic (TCP/UDP/ICMP) from the **IoT-IDS Lab
+Dataset v1.0.1** (Zenodo 24511639). It uses the dataset's own **capture-level** train/test
+split (no window from a test capture is seen in training) and 26 flow features.
+
+**Held-out test captures (1 452 windows): accuracy 0.995 · macro-F1 0.981**
+
+| class | precision | recall | F1 | support |
+|---|---|---|---|---|
+| BENIGN | 0.998 | 1.000 | 0.999 | 1235 |
+| PORT_SCAN | 0.977 | 0.956 | 0.966 | 90 |
+| TCP_BURST (flood) | 0.981 | 0.981 | 0.981 | 103 |
+| UDP_BURST (flood) | 1.000 | 0.958 | 0.979 | 24 |
+
+Model + metrics in `ml/iot_flow/`; dataset in `ml/datasets/iot_flow_windows.csv.gz`. This
+operates on a different feature space (packets/bytes/flags/timing) from the session model and
+complements it: attacker *behaviour* (SSH/Telnet sessions) + network-level IoT *traffic*
+anomalies (all protocols).
+
 ## Honest reading of the numbers (important for the viva)
 
 - The **0.999 figure is on real, held-out internet attacker data** (unseen Cowrie sessions),
