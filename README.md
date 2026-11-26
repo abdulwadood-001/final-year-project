@@ -20,10 +20,15 @@ Supervisor: **Mrs. Sara Naveed**
 > injection, lock token replay). See **`docs/DEVICE_MACHINES.md`**.
 >
 > **Module 8 (AI) — complete:** an XGBoost six-class attack classifier, an Isolation Forest
-> anomaly detector and a 0–100 risk score, served by the `ml_api` microservice; the intel
-> engine classifies every finished session and attaches a plain-English threat narrative
-> (offline template, or GPT-4o / local Ollama). See **`docs/MODEL_CARD.md`**. The 70% status
-> is in **`docs/MILESTONE_70.md`**.
+> anomaly detector, an LSTM 24-hour risk forecaster and a 0–100 risk score, served by the
+> `ml_api` microservice; the intel engine classifies every finished session and attaches a
+> plain-English threat narrative (offline template, or GPT-4o / local Ollama). See
+> **`docs/MODULE8_AI.md`** and **`docs/MODEL_CARD.md`**.
+>
+> **All scope modules are now implemented (100%).** Also added: per-session **PCAP** recording
+> (M3), **GreyNoise** IP reputation (M4), a **dashboard AI panel** (M5) and **Slack** webhook
+> alerts (M6). Every scope item is mapped to its code in **`docs/SCOPE_COVERAGE.md`**. The
+> 70% status is in **`docs/MILESTONE_70.md`**.
 
 ---
 
@@ -120,10 +125,11 @@ Source and development instructions: `dashboard/README.md`.
 | `GET /devices`, `/devices/{device}` | device state, history, change log |
 | `GET /sessions/list`, `/sessions/{id}` | sessions and replay |
 | `GET /captures`, `/captures/{sha256}` | malware samples (metadata only) |
+| `GET /pcaps`, `/pcaps/{session_id}` | per-session packet captures (download .pcap) |
 | `GET /search?q=` | full-text search over commands and payloads, plus IP and credential |
 | `GET /export/events.csv`, `/export/stix`, `/report`, `/report.pdf` | exports and reports |
 | `GET /ml/summary`, `/ml/dataset.csv` | Module 8 labelled dataset |
-| `GET /ml/model`, `/ml/predictions`, `/ml/predictions/{id}`, `/ml/risk` | Module 8 AI: model metrics, per-session classification + threat narrative, risk overview |
+| `GET /ml/model`, `/ml/predictions`, `/ml/predictions/{id}`, `/ml/risk`, `/ml/forecast` | Module 8 AI: model metrics, per-session classification + threat narrative, risk overview, 24h LSTM forecast |
 | `GET /metrics` | Prometheus exposition |
 | `POST /detect` | run an intel pass now |
 | `WS /ws` | live push: events, detections, device state |
