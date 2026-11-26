@@ -479,7 +479,13 @@ export type MlPrediction = {
 };
 export type MlRisk = {
   by_class: { ml_class: string; n: number; avg_risk: number }[];
-  by_device: { device: string; avg_risk: number; max_risk: number; high_risk_sessions: number; sessions: number }[];
+  by_device: {
+    device: string;
+    avg_risk: number;
+    max_risk: number;
+    high_risk_sessions: number;
+    sessions: number;
+  }[];
   top_risk: { ip: string; device: string; ml_class: string; risk: number; predicted_at: string }[];
 };
 export type MlForecast = {
@@ -492,11 +498,23 @@ export type MlForecast = {
 };
 
 export const useMlModel = () =>
-  useQuery({ queryKey: ["ml-model"], queryFn: () => api<MlModel>("/ml/model"), refetchInterval: 120_000 });
+  useQuery({
+    queryKey: ["ml-model"],
+    queryFn: () => api<MlModel>("/ml/model"),
+    refetchInterval: 120_000,
+  });
 export const useMlRisk = () =>
-  useQuery({ queryKey: ["ml-risk"], queryFn: () => api<MlRisk>("/ml/risk"), refetchInterval: 30_000 });
+  useQuery({
+    queryKey: ["ml-risk"],
+    queryFn: () => api<MlRisk>("/ml/risk"),
+    refetchInterval: 30_000,
+  });
 export const useMlForecast = () =>
-  useQuery({ queryKey: ["ml-forecast"], queryFn: () => api<MlForecast[]>("/ml/forecast"), refetchInterval: 60_000 });
+  useQuery({
+    queryKey: ["ml-forecast"],
+    queryFn: () => api<MlForecast[]>("/ml/forecast"),
+    refetchInterval: 60_000,
+  });
 export const useMlPredictions = (minRisk = 0) =>
   useQuery({
     queryKey: ["ml-predictions", minRisk],

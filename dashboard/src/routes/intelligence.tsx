@@ -22,7 +22,10 @@ import {
 import { pageHead } from "@/lib/head";
 
 export const Route = createFileRoute("/intelligence")({
-  head: pageHead("AI Threat Intelligence", "Module 8: ML classification, anomaly, risk and LLM narratives."),
+  head: pageHead(
+    "AI Threat Intelligence",
+    "Module 8: ML classification, anomaly, risk and LLM narratives.",
+  ),
   component: Intelligence,
 });
 
@@ -92,7 +95,9 @@ function Intelligence() {
         <QueryState q={forecast}>
           {(rows) =>
             rows.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No forecast yet — run a detection pass.</p>
+              <p className="text-sm text-muted-foreground">
+                No forecast yet — run a detection pass.
+              </p>
             ) : (
               <div className="grid gap-4 md:grid-cols-3">
                 {rows.map((f) => (
@@ -101,12 +106,17 @@ function Intelligence() {
                       <span className="font-medium capitalize">{f.device}</span>
                       <Tag className="uppercase">{f.model}</Tag>
                     </div>
-                    <div className="mt-2 text-3xl font-semibold" style={{ color: riskColor(f.risk) }}>
+                    <div
+                      className="mt-2 text-3xl font-semibold"
+                      style={{ color: riskColor(f.risk) }}
+                    >
                       {f.risk.toFixed(0)}
                       <span className="text-base text-muted-foreground">/100</span>
                     </div>
                     <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-                      {f.factors?.slice(0, 3).map((x, i) => <li key={i}>• {x}</li>)}
+                      {f.factors?.slice(0, 3).map((x, i) => (
+                        <li key={i}>• {x}</li>
+                      ))}
                     </ul>
                   </div>
                 ))}
@@ -128,7 +138,10 @@ function Intelligence() {
                   <Tooltip />
                   <Bar dataKey="n" radius={4}>
                     {r.by_class.map((c) => (
-                      <Cell key={c.ml_class} fill={CLASS_COLOR[c.ml_class] ?? "var(--color-primary)"} />
+                      <Cell
+                        key={c.ml_class}
+                        fill={CLASS_COLOR[c.ml_class] ?? "var(--color-primary)"}
+                      />
                     ))}
                   </Bar>
                 </BarChart>
@@ -140,7 +153,16 @@ function Intelligence() {
         <Panel title="Average risk by device (24 h)">
           <QueryState q={risk}>
             {(r) => (
-              <DataTable head={<><TH>Device</TH><TH>Avg risk</TH><TH>Max</TH><TH>High-risk</TH></>}>
+              <DataTable
+                head={
+                  <>
+                    <TH>Device</TH>
+                    <TH>Avg risk</TH>
+                    <TH>Max</TH>
+                    <TH>High-risk</TH>
+                  </>
+                }
+              >
                 {r.by_device.map((d) => (
                   <tr key={d.device} className="border-t border-border">
                     <td className="px-3 py-2 capitalize">{d.device}</td>
@@ -158,11 +180,24 @@ function Intelligence() {
       </div>
 
       {/* classified sessions + narrative drawer */}
-      <Panel title="AI-classified sessions" subtitle="Click a session for the LLM threat narrative.">
+      <Panel
+        title="AI-classified sessions"
+        subtitle="Click a session for the LLM threat narrative."
+      >
         <QueryState q={preds}>
           {(rows) => (
             <DataTable
-              head={<><TH>Risk</TH><TH>Class</TH><TH>Conf.</TH><TH>Anomaly</TH><TH>IP</TH><TH>Device</TH><TH>When</TH></>}
+              head={
+                <>
+                  <TH>Risk</TH>
+                  <TH>Class</TH>
+                  <TH>Conf.</TH>
+                  <TH>Anomaly</TH>
+                  <TH>IP</TH>
+                  <TH>Device</TH>
+                  <TH>When</TH>
+                </>
+              }
             >
               {rows.map((p) => (
                 <tr
@@ -170,17 +205,23 @@ function Intelligence() {
                   className="cursor-pointer border-t border-border hover:bg-muted/40"
                   onClick={() => setOpenSession(p.session_id === openSession ? null : p.session_id)}
                 >
-                  <td className="px-3 py-2 font-semibold" style={{ color: riskColor(p.risk) }}>{p.risk.toFixed(0)}</td>
+                  <td className="px-3 py-2 font-semibold" style={{ color: riskColor(p.risk) }}>
+                    {p.risk.toFixed(0)}
+                  </td>
                   <td className="px-3 py-2">
-                    <Tag className="capitalize" >{p.ml_class.replace(/_/g, " ")}</Tag>
+                    <Tag className="capitalize">{p.ml_class.replace(/_/g, " ")}</Tag>
                   </td>
                   <td className="px-3 py-2">{(p.confidence * 100).toFixed(0)}%</td>
                   <td className="px-3 py-2">{(p.anomaly * 100).toFixed(0)}</td>
                   <td className="px-3 py-2 font-mono text-xs">
-                    <Link to="/attackers/$ip" params={{ ip: p.ip }} className="hover:underline">{p.ip}</Link>
+                    <Link to="/attackers/$ip" params={{ ip: p.ip }} className="hover:underline">
+                      {p.ip}
+                    </Link>
                   </td>
                   <td className="px-3 py-2 capitalize">{p.device ?? "—"}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">{timeAgo(p.predicted_at)}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">
+                    {timeAgo(p.predicted_at)}
+                  </td>
                 </tr>
               ))}
             </DataTable>
@@ -190,8 +231,13 @@ function Intelligence() {
         {openSession && (
           <div className="mt-4 rounded-lg border border-primary/30 bg-muted/30 p-4">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-medium">Threat narrative — session {shortId(openSession)}</span>
-              <button className="text-xs text-muted-foreground hover:underline" onClick={() => setOpenSession(null)}>
+              <span className="text-sm font-medium">
+                Threat narrative — session {shortId(openSession)}
+              </span>
+              <button
+                className="text-xs text-muted-foreground hover:underline"
+                onClick={() => setOpenSession(null)}
+              >
                 close
               </button>
             </div>
