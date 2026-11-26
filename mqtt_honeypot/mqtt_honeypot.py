@@ -241,12 +241,14 @@ def apply_control(topic, payload, ip):
 # ── per-client handler ─────────────────────────────────────────────────────
 class Client:
     def __init__(self, conn, addr):
-        self.conn, self.ip, self.sport = conn, addr[0], addr[1]
+        self.ip, self.sport = addr[0], addr[1]
         self.subs = {}
         self.send_lock = threading.Lock()
         self.alive = True
         self.connected = False
         self.s = Session("MQTT", "sensor", self.ip, self.sport, PORT)
+        from common.pcap import RecordingSocket
+        self.conn = RecordingSocket(conn, self.s.pcap) if self.s.start_pcap() else conn
         self.client_id = ""
 
     def send(self, data):

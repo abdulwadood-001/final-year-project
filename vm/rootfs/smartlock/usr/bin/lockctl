@@ -1,0 +1,7 @@
+#!/bin/sh
+# lockctl — SL-200 lock control (talks to lockd)
+case "$1" in
+  help|-h|--help) echo "usage: lockctl [status|lock|unlock|help]" ;;
+  ""|status|lock|unlock) exec devctl lockctl "${1:-status}" ;;
+  *) echo "lockctl: unknown command '$1'" >&2; exit 1 ;;
+esac

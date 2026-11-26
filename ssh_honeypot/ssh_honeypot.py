@@ -25,10 +25,12 @@ from common.fakeshell import FakeShell
 from common.state import STATE, start_heartbeat
 from common.creds import is_weak
 from common import capture
+from common import realshell
 
 PORT = int(os.environ.get("SSH_PORT", 2222))
-DEVICE = "smartlock"
-KEY_FILE = os.environ.get("SSH_HOST_KEY", "/app/data/ssh_host_rsa_key")
+# which emulated device this SSH service belongs to (smartlock on :2222, sensor on :2223)
+DEVICE = os.environ.get("SSH_DEVICE", "smartlock")
+KEY_FILE = os.environ.get("SSH_HOST_KEY", f"/app/data/ssh_host_rsa_key_{DEVICE}")
 SERVER_VERSION = "SSH-2.0-dropbear_2019.78"
 MAX_CONN_PER_IP = 20
 
@@ -55,7 +57,8 @@ class HoneySSH(paramiko.ServerInterface):
         self.channels = {}          # chanid -> {"event": Event, "exec": str|None}
 
     def _chan(self, chanid):
-        return self.channels.setdefault(chanid, {"event": threading.Event(), "exec": None})
+        return self.channels.setdefault(chanid, {"event": threading.Event(), "exec": None,
+                                                  "term": None, "cols": 80, "rows": 24})
 
     def get_allowed_auths(self, username):
         return "password,publickey"
@@ -88,6 +91,14 @@ class HoneySSH(paramiko.ServerInterface):
 
     def check_channel_pty_request(self, channel, term, width, height, pw, ph, modes):
         self.term = term
+        c = self._chan(channel.get_id())
+        c["term"] = term.decode() if isinstance(term, bytes) else term
+        c["cols"], c["rows"] = width or 80, height or 24
+        return True
+
+    def check_channel_window_change_request(self, channel, width, height, pw, ph):
+        c = self._chan(channel.get_id())
+        c["cols"], c["rows"] = width or 80, height or 24
         return True
 
     def check_channel_shell_request(self, channel):
@@ -108,9 +119,18 @@ class HoneySSH(paramiko.ServerInterface):
         return False
 
 
+MOTD = {
+    "smartlock": ("\r\nSmartLock-OS 2.1.4 (SL-200)  —  SecureHome Inc.\r\n"
+                  "Firmware build 2021-03-09.  Type 'lockctl help' for device control.\r\n\r\n"),
+    "sensor": ("\r\nISN-4000 Industrial Sensor Node  (fw 1.0.7)\r\n"
+               "Type 'sensorctl' for sensor status and thresholds.\r\n\r\n"),
+    "cctv": ("\r\nIPC-HFW2431S  V5.5.3 build 180512\r\n"
+             "Type 'camctl help' for camera control.\r\n\r\n"),
+}
+
+
 def interactive(chan, shell, session):
-    motd = ("\r\nSmartLock-OS 2.1.4 (SL-200)  —  SecureHome Inc.\r\n"
-            "Firmware build 2021-03-09.  Type 'lockctl help' for device control.\r\n\r\n")
+    motd = MOTD.get(DEVICE, MOTD["smartlock"])
     chan.send(motd.encode())
     chan.send(shell.prompt.encode())
     buf, last = "", ""
@@ -222,12 +242,60 @@ def scp_sink(chan, shell, session, target):
     return files
 
 
+def _real_interactive(chan, session, meta):
+    """Attach the channel to a throw-away device machine (real restricted shell)."""
+    user = session.username or "root"
+    cols, rows = meta.get("cols") or 80, meta.get("rows") or 24
+    with realshell.RealShellSession(session, DEVICE, user) as rs:
+        rs.open(tty=True, cols=cols, rows=rows, term=meta.get("term") or "vt100")
+
+        def reader():
+            try:
+                return chan.recv(65536)
+            except Exception:
+                return b""
+
+        def writer(data):
+            chan.sendall(data)
+
+        rs.attach(reader, writer)
+
+
+def _real_exec(chan, session, cmd):
+    """Run one `ssh host "cmd"` request inside the device machine."""
+    with realshell.RealShellSession(session, DEVICE, session.username or "root") as rs:
+        rs.open(tty=False, cmd=cmd)
+
+        def reader():
+            try:
+                return chan.recv(65536)
+            except Exception:
+                return b""
+
+        def writer(data):
+            chan.sendall(data)
+
+        rs.attach(reader, writer)
+        chan.send_exit_status(rs.exit_code or 0)
+
+
 def serve_channel(chan, meta, session):
     shell = FakeShell(DEVICE, session=session, user=session.username or "root")
     try:
         cmd = meta["exec"]
         scp = SCP_SINK_RE.match(cmd) if cmd else None
         sink = STDIN_SINK_RE.search(cmd) if cmd and not scp else None
+        # Real restricted shell (sandboxed device machine) when enabled for this device.
+        # scp / stdin-sink uploads keep the dedicated capture path above either way.
+        if realshell.enabled_for(DEVICE) and not scp and not sink:
+            try:
+                if cmd is not None:
+                    _real_exec(chan, session, cmd)
+                else:
+                    _real_interactive(chan, session, meta)
+                return
+            except realshell.SandboxUnavailable as e:
+                log.warning("sandbox unavailable, using fake shell: %s", e)
         if scp:
             session.command(cmd, output="")
             scp_sink(chan, shell, session, scp.group(1))
@@ -274,6 +342,9 @@ def handle(sock, addr):
         if too_many:
             session.event("rate_limited")
             return
+        from common.pcap import RecordingSocket
+        if session.start_pcap():                     # capture the real on-wire bytes (M3)
+            sock = RecordingSocket(sock, session.pcap)
         transport = paramiko.Transport(sock)
         transport.local_version = SERVER_VERSION
         transport.add_server_key(HOST_KEY)
@@ -319,12 +390,12 @@ def main():
     global HOST_KEY
     HOST_KEY = get_host_key()
     STATE.init_defaults()
-    start_heartbeat("ssh", port=PORT, device=DEVICE, protocol="SSH")
+    start_heartbeat("ssh" if DEVICE == "smartlock" else f"ssh_{DEVICE}", port=PORT, device=DEVICE, protocol="SSH")
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("0.0.0.0", PORT))
     srv.listen(200)
-    log.info("SSH honeypot (Smart Lock) listening on :%d", PORT)
+    log.info("SSH honeypot (%s) listening on :%d", DEVICE, PORT)
     while True:
         try:
             c, a = srv.accept()

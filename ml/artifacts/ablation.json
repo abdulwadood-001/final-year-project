@@ -1,0 +1,57 @@
+{
+  "removed": [
+    "auth_attempts",
+    "auth_success",
+    "cmd_download",
+    "commands",
+    "distinct_passwords",
+    "distinct_usernames",
+    "download_attempts",
+    "file_events"
+  ],
+  "kept": [
+    "duration_s",
+    "events_total",
+    "exec_attempts",
+    "http_requests",
+    "http_404",
+    "mqtt_publishes",
+    "mqtt_control",
+    "mqtt_wildcard_subs",
+    "rtsp_requests",
+    "rtsp_route_probes",
+    "malformed",
+    "state_changes",
+    "cmd_chmod",
+    "cmd_busybox",
+    "cmd_tmp_paths",
+    "cmd_discovery",
+    "mean_cmd_len",
+    "mean_gap_s",
+    "std_gap_s",
+    "ip_protocols_1h",
+    "ip_sessions_1h"
+  ],
+  "results": {
+    "ALL 29 features (incl. rule features)": {
+      "accuracy": 0.9987,
+      "macro_f1": 0.9987,
+      "per_class": {
+        "brute_force": 1.0,
+        "malware_delivery": 0.997,
+        "port_scan": 1.0,
+        "normal": 0.997
+      }
+    },
+    "ABLATION: 21 features, rule features REMOVED": {
+      "accuracy": 0.9827,
+      "macro_f1": 0.9827,
+      "per_class": {
+        "brute_force": 0.999,
+        "malware_delivery": 0.996,
+        "port_scan": 0.971,
+        "normal": 0.965
+      }
+    }
+  }
+}

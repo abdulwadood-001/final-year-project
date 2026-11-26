@@ -7,3 +7,5 @@ import tempfile
 os.environ.setdefault("DB_CONNECT_RETRIES", "1")
 # captured malware samples go to a throw-away directory during tests
 os.environ.setdefault("CAPTURE_DIR", tempfile.mkdtemp(prefix="hb-captures-"))
+os.environ.setdefault("PCAP_DIR", tempfile.mkdtemp(prefix="hb-pcap-"))
+os.environ.setdefault("PCAP_ENABLED", "0")

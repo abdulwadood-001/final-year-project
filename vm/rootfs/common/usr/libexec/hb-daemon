@@ -1,0 +1,5 @@
+#!/bin/sh
+# Placeholder body for the board's daemons (lockd, sensor_daemon, sonia …):
+# they only need to show up in `ps`. The real behaviour is served by HoneyBot.
+trap 'exit 0' TERM INT
+while :; do sleep 3600; done

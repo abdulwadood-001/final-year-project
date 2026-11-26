@@ -299,6 +299,7 @@ class Session:
         self.commands = 0
         self.closed = False
         self.started = time.time()
+        self.pcap = None                        # per-session PCAP tap (scope M3), lazily created
         _enqueue("session", """
             INSERT INTO sessions (session_id, ip, src_port, dst_port, device, protocol,
                                   started_at, client_version, meta)
@@ -307,6 +308,39 @@ class Session:
               _clip(client_version, 200), _json(meta)))
         if log_connect:
             self.event("connect", dst_port=dst_port)
+
+    # ── per-session packet capture (scope M3 "PCAP Recording") ──────────────
+    def start_pcap(self):
+        """Begin recording this session's packets. Returns the PcapTap (idempotent)."""
+        if self.pcap is None:
+            try:
+                from common.pcap import PcapTap, PCAP_ENABLED
+                if PCAP_ENABLED:
+                    self.pcap = PcapTap(self.id, self.ip, self.src_port, self.dst_port,
+                                        self.device, self.protocol)
+            except Exception as e:  # pragma: no cover
+                log.debug("pcap tap init failed: %s", e)
+        return self.pcap
+
+    def pcap_in(self, data):
+        if self.pcap is not None:
+            self.pcap.inbound(data)
+
+    def pcap_out(self, data):
+        if self.pcap is not None:
+            self.pcap.outbound(data)
+
+    def _flush_pcap(self):
+        if self.pcap is None:
+            return
+        path = self.pcap.flush()
+        if path:
+            _enqueue("pcap", """
+                INSERT INTO pcap_files (session_id, ip, device, protocol, storage_path, packets, bytes, truncated)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (session_id) DO NOTHING
+            """, (self.id, self.ip, self.device, self.protocol, path,
+                  len(self.pcap.frames) + 6, self.pcap.total, self.pcap.truncated))
 
     # convenience wrappers --------------------------------------------------
     def event(self, event_type, **kw):
@@ -332,6 +366,7 @@ class Session:
         if self.closed:
             return
         self.closed = True
+        self._flush_pcap()
         self.event("disconnect", reason=reason, duration=round(time.time() - self.started, 3))
         _enqueue("session_close", """
             UPDATE sessions SET ended_at=%s, auth_attempts=%s, login_success=%s,

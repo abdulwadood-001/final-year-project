@@ -34,4 +34,5 @@ types:
 
 channels:
   telegram: { enabled: true }   # needs TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env
+  slack:    { enabled: true }   # needs SLACK_WEBHOOK_URL in .env
   email:    { enabled: true }   # needs SMTP_HOST, SMTP_USER, SMTP_PASSWORD, ALERT_EMAIL_TO in .env

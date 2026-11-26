@@ -37,7 +37,7 @@ from common.schema import ensure_schema
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("api")
 
-VERSION = "0.7"
+VERSION = "0.8"
 
 
 @asynccontextmanager
@@ -50,16 +50,16 @@ async def lifespan(_app):
 app = FastAPI(title="HoneyBot-IoT API", version=VERSION, lifespan=lifespan,
               description="Threat-intelligence API of the HoneyBot-IoT multi-protocol IoT honeypot.")
 
-PROTOCOLS = ["SSH", "Telnet", "HTTP", "MQTT", "RTSP"]
+PROTOCOLS = ["SSH", "Telnet", "HTTP", "MQTT", "RTSP", "Modbus"]
 ACTIVITY = ("auth", "command", "http_request", "mqtt_publish", "mqtt_subscribe", "rtsp_request",
             "download_attempt", "state_change", "malformed", "file_write", "file_upload", "file_capture",
             "exec_attempt", "stream_access")
-SERVICES = ("ssh", "telnet", "http", "mqtt", "rtsp", "device_state", "intel")
+SERVICES = ("ssh", "ssh_sensor", "telnet", "http", "mqtt", "rtsp", "modbus", "device_state", "intel")
 DEVICES = {
     "cctv": {"name": "CCTV Camera", "protocols": ["RTSP", "HTTP"], "services": ["rtsp", "http"]},
     "smartlock": {"name": "Smart Lock", "protocols": ["SSH", "HTTP", "MQTT"], "services": ["ssh", "http", "mqtt"]},
-    "sensor": {"name": "Industrial Sensor", "protocols": ["Telnet", "MQTT", "HTTP"],
-               "services": ["telnet", "mqtt", "http"]},
+    "sensor": {"name": "Industrial Sensor", "protocols": ["Telnet", "SSH", "Modbus", "MQTT", "HTTP"],
+               "services": ["telnet", "ssh_sensor", "modbus", "mqtt", "http"]},
 }
 SECRET_FIELDS = ("api_token",)
 
@@ -444,6 +444,37 @@ def capture_detail(sha256: str):
     return {"sha256": sha256.lower(), "sightings": rows}
 
 
+# ── M3: per-session packet captures (forensic replay) ───────────────────────
+@app.get("/api/pcaps")
+def pcaps(limit: int = Query(100, le=1000), ip: str = Query(None)):
+    """List recorded per-session PCAPs (metadata only)."""
+    where, params = [], []
+    if ip:
+        where.append("ip = %s")
+        params.append(ip)
+    params.append(limit)
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    return _iso(fetchdicts(f"""
+        SELECT session_id, ip, device, protocol, packets, bytes, truncated, captured_at
+        FROM pcap_files {clause} ORDER BY captured_at DESC LIMIT %s""", tuple(params)))
+
+
+@app.get("/api/pcaps/{session_id}")
+def pcap_download(session_id: str):
+    """Download the session's .pcap for Wireshark/tshark analysis."""
+    import os
+    rows = fetchdicts("SELECT storage_path FROM pcap_files WHERE session_id = %s", (session_id,))
+    if not rows or not rows[0].get("storage_path"):
+        raise HTTPException(404, "pcap not found")
+    path = rows[0]["storage_path"]
+    if not os.path.isfile(path):
+        raise HTTPException(404, "pcap file missing on disk")
+    with open(path, "rb") as f:
+        data = f.read()
+    return Response(data, media_type="application/vnd.tcpdump.pcap",
+                    headers={"Content-Disposition": f'attachment; filename="{session_id}.pcap"'})
+
+
 # ── search / export / reports ───────────────────────────────────────────────
 @app.get("/api/search")
 def search(q: str = Query(..., min_length=2), limit: int = Query(100, le=1000)):
@@ -515,6 +546,98 @@ def ml_dataset(days: int = Query(30, ge=1, le=365)):
     from ml.features import build_dataset, to_csv
     return Response(to_csv(build_dataset(days)), media_type="text/csv",
                     headers={"Content-Disposition": "attachment; filename=honeybot_ml_dataset.csv"})
+
+
+# ── Module 8 inference (AI classifier / anomaly / risk / narrative) ──────────
+@app.get("/api/ml/model")
+def ml_model():
+    """Trained-model metadata: classes, 5-fold CV metrics, top features, class balance.
+    Served by the ml_api microservice (falls back to the local artifact file)."""
+    import os
+    import json
+    import urllib.request
+    url = os.environ.get("ML_API_URL", "http://ml_api:5001").rstrip("/") + "/model"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            return {"trained": True, **json.loads(r.read())}
+    except Exception:
+        pass
+    meta_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "ml", "artifacts", "model_meta.json")
+    if os.path.exists(meta_path):
+        with open(meta_path) as f:
+            return {"trained": True, **json.load(f)}
+    return {"trained": False, "hint": "run: python -m ml.train"}
+
+
+@app.get("/api/ml/predictions")
+def ml_predictions(limit: int = Query(100, ge=1, le=1000),
+                   min_risk: float = Query(0, ge=0, le=100),
+                   device: str = Query(None)):
+    """Per-session AI classifications, highest-risk first (for the dashboard AI feed)."""
+    where = ["risk >= %s"]
+    params = [min_risk]
+    if device:
+        where.append("device = %s")
+        params.append(device)
+    params.append(limit)
+    return fetchdicts(f"""
+        SELECT session_id, ip, device, protocol, ml_class, confidence, anomaly, risk,
+               probabilities, model_version, predicted_at
+        FROM ml_predictions WHERE {' AND '.join(where)}
+        ORDER BY risk DESC, predicted_at DESC LIMIT %s
+    """, tuple(params))
+
+
+@app.get("/api/ml/predictions/{session_id}")
+def ml_prediction_detail(session_id: str):
+    """One session's full AI verdict including the threat narrative."""
+    rows = fetchdicts("SELECT * FROM ml_predictions WHERE session_id = %s", (session_id,))
+    if not rows:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    return rows[0]
+
+
+@app.get("/api/ml/flow")
+def ml_flow(limit: int = Query(200, ge=1, le=2000)):
+    """Network-flow IDS verdicts (non-benign first) and a per-label summary."""
+    summary = fetchdicts("""SELECT label, COUNT(*) AS windows, COUNT(DISTINCT ip) AS ips,
+                                   round(avg(confidence)::numeric, 3) AS avg_conf
+                            FROM flow_detections GROUP BY label ORDER BY windows DESC""")
+    recent = _iso(fetchdicts("""SELECT ip, device, window_start, label, confidence FROM flow_detections
+                                WHERE label <> 'BENIGN' ORDER BY window_start DESC LIMIT %s""", (limit,)))
+    return {"summary": summary, "recent": recent}
+
+
+@app.get("/api/ml/forecast")
+def ml_forecast():
+    """Per-device 24-hour predictive escalation risk (M8-FE-4, LSTM) with factor breakdown."""
+    return _iso(fetchdicts("""
+        SELECT device, risk, horizon_hours, model, factors, updated_at
+        FROM device_risk ORDER BY risk DESC"""))
+
+
+@app.get("/api/ml/risk")
+def ml_risk():
+    """AI risk overview the dashboard shows: class distribution and per-device risk."""
+    classes = fetchdicts("""
+        SELECT ml_class, COUNT(*) AS n, round(avg(risk)::numeric, 1) AS avg_risk
+        FROM ml_predictions GROUP BY ml_class ORDER BY n DESC
+    """)
+    devices = fetchdicts("""
+        SELECT device,
+               round(avg(risk)::numeric, 1) AS avg_risk,
+               round(max(risk)::numeric, 1) AS max_risk,
+               COUNT(*) FILTER (WHERE risk >= 70) AS high_risk_sessions,
+               COUNT(*) AS sessions
+        FROM ml_predictions WHERE predicted_at > NOW() - INTERVAL '24 hours'
+        GROUP BY device ORDER BY avg_risk DESC
+    """)
+    top = fetchdicts("""
+        SELECT ip, device, ml_class, risk, predicted_at FROM ml_predictions
+        ORDER BY risk DESC, predicted_at DESC LIMIT 10
+    """)
+    return {"by_class": classes, "by_device": devices, "top_risk": top}
 
 
 # ── Prometheus metrics (scope M7 resource / service monitoring) ─────────────

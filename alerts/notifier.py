@@ -1,7 +1,7 @@
 """
 HoneyBot-IoT — Alert & Notification system (scope Module 6).
 
-* channels   : Telegram Bot API and SMTP e-mail (HTML)
+* channels   : Telegram Bot API, Slack incoming webhook, and SMTP e-mail (HTML)
 * thresholds : alerts.yaml – global min severity + per attack-type overrides
 * dedupe     : one alert per attacker IP per window; a higher-severity detection
                inside the window is escalated once, everything else is stored
@@ -104,6 +104,40 @@ def send_telegram(text):
         return "failed", str(e)[:300]
 
 
+def send_slack(det, geo):
+    """Post a Block-Kit alert to a Slack incoming webhook (SLACK_WEBHOOK_URL)."""
+    url = os.environ.get("SLACK_WEBHOOK_URL")
+    if not url or not (config().get("channels") or {}).get("slack", {}).get("enabled", True):
+        return "disabled", "SLACK_WEBHOOK_URL not set"
+    mitre = ", ".join(f"{t}" for t in (det.get("mitre") or [])) or "-"
+    color = {"CRITICAL": "#c62828", "HIGH": "#ef6c00", "MEDIUM": "#f9a825"}.get(det["severity"], "#1565c0")
+    payload = {
+        "text": f"HoneyBot-IoT {det['severity']} — {det['attack_type']} from {det['ip']}",
+        "attachments": [{
+            "color": color,
+            "blocks": [
+                {"type": "header", "text": {"type": "plain_text",
+                 "text": f"{ICON.get(det['severity'], '⚠️')} {det['severity']} — {det['attack_type']}"}},
+                {"type": "section", "fields": [
+                    {"type": "mrkdwn", "text": f"*Attacker:*\n{det['ip']}" + (f" ({geo})" if geo else "")},
+                    {"type": "mrkdwn", "text": f"*Target:*\n{det.get('device') or '-'} / {det.get('protocol') or '-'}"},
+                    {"type": "mrkdwn", "text": f"*MITRE:*\n{mitre}"},
+                    {"type": "mrkdwn", "text": f"*Time:*\n{det.get('timestamp')}"},
+                ]},
+                {"type": "section", "text": {"type": "mrkdwn", "text": f"*Details:* {det['details'][:400]}"}},
+            ],
+        }],
+    }
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            ok = r.read().decode().strip() == "ok" or r.status == 200
+            return ("sent", None) if ok else ("failed", "unexpected Slack response")
+    except Exception as e:
+        return "failed", str(e)[:300]
+
+
 def email_configured():
     return bool(os.environ.get("SMTP_HOST") and os.environ.get("ALERT_EMAIL_TO")) and \
         (config().get("channels") or {}).get("email", {}).get("enabled", True)
@@ -170,11 +204,13 @@ def notify(detections):
             text = "⬆️ ESCALATION\n" + text
         tg_status, tg_err = send_telegram(text)
         _record(det, "telegram", tg_status, text, tg_err)
+        sl_status, sl_err = send_slack(det, geo)
+        _record(det, "slack", sl_status, text, sl_err)
         em_status, em_err = send_email(f"[HoneyBot-IoT] {det['severity']} {det['attack_type']} from {det['ip']}",
                                        format_html(det, geo), text)
         _record(det, "email", em_status, text, em_err)
         execute("UPDATE detections SET alerted=TRUE WHERE id=%s", (det.get("id"),))
         sent += 1
-        log.info("ALERT %s %s %s | telegram=%s email=%s", det["severity"], det["attack_type"], det["ip"],
-                 tg_status, em_status)
+        log.info("ALERT %s %s %s | telegram=%s slack=%s email=%s", det["severity"], det["attack_type"],
+                 det["ip"], tg_status, sl_status, em_status)
     return sent

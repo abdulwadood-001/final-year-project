@@ -50,6 +50,7 @@ const PROTOCOL_COLORS: Record<string, string> = {
   http: "var(--color-chart-3)",
   mqtt: "var(--color-chart-4)",
   rtsp: "var(--color-chart-5)",
+  modbus: "var(--color-chart-6)",
 };
 
 const tooltipStyle = {
@@ -102,7 +103,7 @@ function Overview() {
     <div className="bg-grid min-h-screen p-4 md:p-6">
       <PageHeader
         title="Threat Overview"
-        subtitle="Honeynet activity across all 3 emulated devices and 5 protocols"
+        subtitle="Honeynet activity across all 3 emulated devices and 6 protocols"
         action={
           <div className="flex items-center gap-2">
             <button

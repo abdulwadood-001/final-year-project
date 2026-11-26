@@ -1,0 +1,9 @@
+#!/bin/sh
+# camctl — IP camera control (talks to the ipcam daemon)
+case "$1" in
+  help|-h|--help) echo "usage: camctl [status|record on|record off]" ;;
+  ""|status) exec devctl camctl status ;;
+  record) case "$2" in on|off) exec devctl camctl record "$2" ;; esac
+          echo "usage: camctl record on|off" >&2; exit 1 ;;
+  *) echo "camctl: unknown command '$1'" >&2; exit 1 ;;
+esac

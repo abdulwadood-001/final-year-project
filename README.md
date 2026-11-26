@@ -4,23 +4,49 @@
 Abdul Wadood (CIIT/SP23-BCT-001/ISB) · Abdul Rahman (CIIT/SP23-BCT-003/ISB)
 Supervisor: **Mrs. Sara Naveed**
 
-> **Milestone: 70% (v0.7).** Three emulated IoT devices (CCTV camera, smart lock,
-> industrial sensor) over five protocols (SSH, Telnet, HTTP/HTTPS, MQTT, RTSP); a unified
-> event store; rule-based detection with MITRE ATT&CK; malware capture with YARA; STIX 2.1
-> export; PDF threat reports; a React/TypeScript SOC dashboard with WebSocket live push;
-> automatic network isolation; backups; and Prometheus/Grafana monitoring. Module 8 (AI) has
-> started: the labelled ML dataset is produced live. Model training is the 100% work.
-> See **`docs/MILESTONE_70.md`** for the deliverable-by-deliverable status.
+> **Milestone: 70% (v0.7) + device-machine build (v0.8).** Three emulated IoT devices (CCTV
+> camera, smart lock, industrial sensor) over six protocols (SSH, Telnet, HTTP/HTTPS, MQTT,
+> RTSP, Modbus/TCP); a unified event store; rule-based detection with MITRE ATT&CK; malware
+> capture with YARA; STIX 2.1 export; PDF threat reports; a React/TypeScript SOC dashboard
+> with WebSocket live push; automatic network isolation; backups; and Prometheus/Grafana
+> monitoring.
+>
+> **New in v0.8:** each device now runs as its **own machine** (container) exposing only its
+> protocols; a successful SSH/Telnet login drops the attacker into a **real but restricted
+> BusyBox shell** in a throw-away, network-less sandbox that is wiped at logout; an
+> industrial **Modbus/TCP** service; emulation of **real IoT web CVEs** (Hikvision
+> CVE-2021-36260, Dahua bypass, GPON, Realtek, Huawei) and device-specific attacks (camera
+> credential disclosure CVE-2017-8225 / CVE-2018-9995, ONVIF rogue admin, Modbus false-data
+> injection, lock token replay). See **`docs/DEVICE_MACHINES.md`**.
+>
+> **Module 8 (AI) — complete:** an XGBoost six-class attack classifier, an Isolation Forest
+> anomaly detector, an LSTM 24-hour risk forecaster and a 0–100 risk score, served by the
+> `ml_api` microservice; the intel engine classifies every finished session and attaches a
+> plain-English threat narrative (offline template, or GPT-4o / local Ollama). See
+> **`docs/MODULE8_AI.md`** and **`docs/MODEL_CARD.md`**.
+>
+> **All scope modules are now implemented (100%).** Also added: per-session **PCAP** recording
+> (M3), **GreyNoise** IP reputation (M4), a **dashboard AI panel** (M5) and **Slack** webhook
+> alerts (M6). Every scope item is mapped to its code in **`docs/SCOPE_COVERAGE.md`**. The
+> 70% status is in **`docs/MILESTONE_70.md`**.
 
 ---
 
 ## What it does
 
-| Device | Protocols | What attackers get |
+Each device is its own machine (container) with its own hostname, IP and MAC, exposing only
+its own protocols:
+
+| Device machine | Protocols | What attackers get |
 |---|---|---|
-| CCTV camera (IPC-HFW2431S) | RTSP :554, HTTP :8080 / HTTPS :8443 | Boa web panel with login, live view and firmware upload; RTSP Basic and Digest auth with a valid H.264 SDP |
-| Smart lock (SL-200) | SSH :2222, HTTP REST :8081, MQTT :1883 | Dropbear-style shell with `lockctl`; token REST API; `lock/cmd` topic. Unlocking on one protocol is visible on all |
-| Industrial sensor (ISN-4000) | Telnet :2323, MQTT :1883, HTTP HMI :8082 | BusyBox shell with `sensorctl`; live telemetry; writable alarm thresholds |
+| CCTV camera (IPC-HFW2431S) | RTSP :554, HTTP :8080 / HTTPS :8443 | Boa web panel with login, live view and firmware upload; RTSP Basic and Digest auth, then a **real H.264 video stream** (RTP interleaved over TCP); **real IoT CVE endpoints** |
+| Smart lock (SL-200) | SSH :2222, HTTP REST :8081, MQTT :1883 | **Real restricted BusyBox shell** with `lockctl`; token REST API; `lock/cmd` topic. Unlocking on one protocol is visible on all |
+| Industrial sensor (ISN-4000) | Telnet :2323, SSH :2223, Modbus/TCP :502, MQTT :1883, HTTP HMI :8082 | **Real restricted BusyBox shell** with `sensorctl`; live telemetry; writable alarm thresholds, also over Modbus registers |
+
+On a successful SSH/Telnet login the attacker gets a **real but heavily restricted shell** in
+a throw-away device container (no network, read-only root, CPU/memory/process/time limits,
+wiped at logout). Set `SHELL_MODE=fake` for the in-process emulated shell. See
+**`docs/DEVICE_MACHINES.md`**.
 
 Every interaction is stored as one row in `events`. Every 30 s the threat-intelligence engine:
 - YARA-scans newly captured samples;
@@ -53,8 +79,8 @@ docker compose --profile monitoring up -d                     # Grafana http://1
 ### Run the demo traffic
 
 ```bash
-docker compose --profile sim run --rm attacker                # 10 attack scenarios from inside the honeynet
-python3 tests/simulate_attacks.py --host 127.0.0.1 --confirm-own-honeypot   # or from your machine
+docker compose --profile sim run --rm attacker                # 13 attack scenarios from inside the honeynet
+python3 tests/simulate_attacks.py --host 127.0.0.1 --confirm-own-honeypot   # or from your machine (all ports on localhost)
 ```
 
 Detections appear within 30 s; **Detect now** on the overview page runs a pass at once.
@@ -99,9 +125,11 @@ Source and development instructions: `dashboard/README.md`.
 | `GET /devices`, `/devices/{device}` | device state, history, change log |
 | `GET /sessions/list`, `/sessions/{id}` | sessions and replay |
 | `GET /captures`, `/captures/{sha256}` | malware samples (metadata only) |
+| `GET /pcaps`, `/pcaps/{session_id}` | per-session packet captures (download .pcap) |
 | `GET /search?q=` | full-text search over commands and payloads, plus IP and credential |
 | `GET /export/events.csv`, `/export/stix`, `/report`, `/report.pdf` | exports and reports |
 | `GET /ml/summary`, `/ml/dataset.csv` | Module 8 labelled dataset |
+| `GET /ml/model`, `/ml/predictions`, `/ml/predictions/{id}`, `/ml/risk`, `/ml/forecast` | Module 8 AI: model metrics, per-session classification + threat narrative, risk overview, 24h LSTM forecast |
 | `GET /metrics` | Prometheus exposition |
 | `POST /detect` | run an intel pass now |
 | `WS /ws` | live push: events, detections, device state |
@@ -122,11 +150,15 @@ when the `captures` volume is mounted read-write.
 
 ```
 common/           db.py (unified logging) · state.py (device state) · fakeshell.py · capture.py · creds.py · schema.py
-ssh_honeypot/ telnet_honeypot/ http_honeypot/ mqtt_honeypot/ rtsp_honeypot/ device_state/
+                  cmdintel.py (command parsing) · realshell.py (real-shell client + devctl bridge)
+device_machine.py one-container-per-device supervisor
+vm/               Dockerfile + rootfs/ for the per-device machine images (real shell)
+sandbox/          sandbox.py — starts/destroys the throw-away device containers (Docker API)
+ssh_honeypot/ telnet_honeypot/ http_honeypot/ (+ exploits.py) mqtt_honeypot/ rtsp_honeypot/ modbus_honeypot/ device_state/
 intel/            engine.py · rules.py · mitre.py · correlate.py · geo.py · yara_scan.py · yara_rules/ · stix.py · report.py
 alerts/           notifier.py · alerts.yaml
 api/              api.py (REST + WebSocket)
-ml/               features.py (Module 8 dataset)
+ml/               features.py (dataset) · synth.py · train.py (XGBoost + Isolation Forest) · model.py · narrator.py · score.py · ml_api.py
 dashboard/        React + TypeScript SPA (built into the Nginx image)
 deploy/           firewall.sh · auth-init.sh · backup.sh · get_geoip.sh
 monitoring/       prometheus.yml · alerts.yml · grafana/

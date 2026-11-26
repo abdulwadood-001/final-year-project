@@ -1,0 +1,18 @@
+#!/bin/sh
+# Reports the emulated board, not the host kernel the sandbox runs on.
+. /etc/hb-device.conf
+[ $# -eq 0 ] && set -- -s
+out=""
+for a in "$@"; do
+  case "$a" in
+    -a|--all) out="Linux $HB_HOSTNAME $HB_KERNEL $HB_KBUILD $HB_ARCH GNU/Linux"; break ;;
+    -s) out="$out Linux" ;;
+    -n) out="$out $HB_HOSTNAME" ;;
+    -r) out="$out $HB_KERNEL" ;;
+    -v) out="$out $HB_KBUILD" ;;
+    -m|-p|-i) out="$out $HB_ARCH" ;;
+    -o) out="$out GNU/Linux" ;;
+    *) echo "uname: invalid option -- '${a#-}'" >&2; exit 1 ;;
+  esac
+done
+echo ${out# }

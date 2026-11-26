@@ -47,7 +47,7 @@ def store(dets):
         key = f"{d['ip']}|{d['attack_type']}|{d.get('protocol') or '-'}|{d.get('session_id') or '-'}|{bucket}"
         if d["attack_type"] in ("BRUTE_FORCE", "RECONNAISSANCE", "WEB_SCAN", "MULTI_PROTOCOL_ATTACK",
                                 "CREDENTIAL_STUFFING", "BOTNET_C2", "PROTOCOL_EXPLOIT", "RTSP_ROUTE_ENUM",
-                                "CREDENTIAL_COMPROMISE", "ICS_PROCESS_MONITORING"):
+                                "CREDENTIAL_COMPROMISE", "ICS_PROCESS_MONITORING", "MQTT_FLOOD"):
             key = f"{d['ip']}|{d['attack_type']}|{d.get('protocol') or '-'}|{d.get('device') or '-'}|{bucket}"
         if key in seen:
             continue
@@ -95,6 +95,11 @@ def run_once():
     except Exception as e:
         log.error("YARA scan failed: %s", e)
     dets = rules.run_rules()
+    try:                                    # Module 8: network-flow IDS on the honeypot's own PCAPs
+        from ml import flow
+        dets += flow.score_pending()
+    except Exception as e:
+        log.error("flow IDS failed: %s", e)
     new = store(dets)
     publish(new)
     try:
@@ -109,14 +114,22 @@ def run_once():
             log.error("notifier failed: %s", e)
     for d in new:
         log.info("DETECTION %-8s %-24s %-15s %s", d["severity"], d["attack_type"], d["ip"], d["details"][:90])
+    ai_scored = 0
+    try:                                    # Module 8: classify + narrate finished sessions
+        from ml import score
+        ai_scored = score.score_pending()
+        score.forecast_devices()            # M8-FE-4: per-device 24h LSTM risk forecast
+    except Exception as e:
+        log.error("AI scoring failed: %s", e)
     try:
         from intel import report
         report.maybe_send_daily()
     except Exception as e:
         log.error("daily report failed: %s", e)
-    log.info("pass: %d samples scanned, %d matches, %d new detections, %d alerts, %.2fs",
-             scanned, len(dets), len(new), sent, time.time() - t0)
-    return {"samples_scanned": scanned, "matches": len(dets), "new_detections": len(new), "alerts_sent": sent}
+    log.info("pass: %d samples scanned, %d matches, %d new detections, %d alerts, %d AI-scored, %.2fs",
+             scanned, len(dets), len(new), sent, ai_scored, time.time() - t0)
+    return {"samples_scanned": scanned, "matches": len(dets), "new_detections": len(new),
+            "alerts_sent": sent, "ai_scored": ai_scored}
 
 
 def main():

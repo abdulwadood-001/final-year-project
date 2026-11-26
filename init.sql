@@ -86,8 +86,21 @@ CREATE TABLE IF NOT EXISTS attackers (
     threat_level  TEXT     DEFAULT 'LOW',
     threat_score  INTEGER  DEFAULT 0,
     attack_types  TEXT[]   DEFAULT '{}',
+    reputation        TEXT,              -- M4 GreyNoise: malicious | benign | unknown
+    reputation_name   TEXT,              -- actor / tag, e.g. "Mirai", "Censys"
+    reputation_noise  BOOLEAN,           -- seen scanning the internet (GreyNoise "noise")
+    reputation_riot   BOOLEAN,           -- known-benign common service (GreyNoise "RIOT")
+    reputation_source TEXT,              -- greynoise | unavailable | disabled
+    reputation_checked_at TIMESTAMPTZ,
     updated_at    TIMESTAMPTZ DEFAULT NOW()
 );
+-- in-place migration for databases created before the reputation columns existed
+ALTER TABLE attackers ADD COLUMN IF NOT EXISTS reputation        TEXT;
+ALTER TABLE attackers ADD COLUMN IF NOT EXISTS reputation_name   TEXT;
+ALTER TABLE attackers ADD COLUMN IF NOT EXISTS reputation_noise  BOOLEAN;
+ALTER TABLE attackers ADD COLUMN IF NOT EXISTS reputation_riot   BOOLEAN;
+ALTER TABLE attackers ADD COLUMN IF NOT EXISTS reputation_source TEXT;
+ALTER TABLE attackers ADD COLUMN IF NOT EXISTS reputation_checked_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS campaigns (
     campaign_id  TEXT PRIMARY KEY,
@@ -184,6 +197,63 @@ CREATE TABLE IF NOT EXISTS intel_state (
     key        TEXT PRIMARY KEY,
     value      TEXT,
     updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ── M3: per-session packet captures (libpcap, for forensic replay) ──────────
+CREATE TABLE IF NOT EXISTS pcap_files (
+    session_id   UUID PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+    ip           TEXT,
+    device       TEXT,
+    protocol     TEXT,
+    storage_path TEXT,
+    packets      INTEGER,
+    bytes        INTEGER,
+    truncated    BOOLEAN DEFAULT FALSE,
+    captured_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pcap_ip ON pcap_files(ip);
+ALTER TABLE pcap_files ADD COLUMN IF NOT EXISTS flow_scored BOOLEAN DEFAULT FALSE;
+
+-- ── Module 8: network-flow IDS verdicts per 1-s traffic window (ml/flow.py) ──
+CREATE TABLE IF NOT EXISTS flow_detections (
+    id           BIGSERIAL PRIMARY KEY,
+    ip           TEXT,
+    device       TEXT,
+    window_start TIMESTAMPTZ,
+    label        TEXT,               -- BENIGN | PORT_SCAN | TCP_BURST | UDP_BURST
+    confidence   REAL,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_flow_det_ip ON flow_detections(ip);
+CREATE INDEX IF NOT EXISTS idx_flow_det_label ON flow_detections(label);
+
+-- ── Module 8 (AI): per-session classifier / anomaly / risk results ──────────
+CREATE TABLE IF NOT EXISTS ml_predictions (
+    session_id    UUID PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+    ip            TEXT,
+    device        TEXT,
+    protocol      TEXT,
+    ml_class      TEXT,              -- one of the six scope classes
+    confidence    REAL,
+    anomaly       REAL,              -- 0-1, Isolation Forest (1 = most anomalous)
+    risk          REAL,              -- 0-100 predictive risk score
+    probabilities JSONB,            -- full class → probability map
+    model_version TEXT,
+    narrative     TEXT,              -- LLM/template threat narrative
+    predicted_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ml_pred_class ON ml_predictions(ml_class);
+CREATE INDEX IF NOT EXISTS idx_ml_pred_risk ON ml_predictions(risk);
+CREATE INDEX IF NOT EXISTS idx_ml_pred_device ON ml_predictions(device);
+
+-- ── Module 8 (M8-FE-4): per-device 24h predictive risk (LSTM forecaster) ────
+CREATE TABLE IF NOT EXISTS device_risk (
+    device        TEXT PRIMARY KEY,
+    risk          REAL,
+    horizon_hours INTEGER DEFAULT 24,
+    model         TEXT,                -- lstm | trend
+    factors       JSONB,
+    updated_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ── Backwards-compatible views (old per-protocol tables) ────────────────────

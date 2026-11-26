@@ -39,6 +39,7 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
@@ -74,6 +75,7 @@
   --chart-3: oklch(0.63 0.22 25);
   --chart-4: oklch(0.7 0.12 200);
   --chart-5: oklch(0.8 0.15 90);
+  --chart-6: oklch(0.68 0.16 300);
 }
 
 @layer base {

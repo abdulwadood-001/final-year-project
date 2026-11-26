@@ -1,0 +1,108 @@
+{
+  "version": "iot-flow-xgb",
+  "classes": [
+    "BENIGN",
+    "PORT_SCAN",
+    "TCP_BURST",
+    "UDP_BURST"
+  ],
+  "features": [
+    "n_pkts",
+    "n_bytes",
+    "len_mean",
+    "len_std",
+    "len_max",
+    "n_small",
+    "n_tcp",
+    "n_udp",
+    "n_icmp",
+    "n_other",
+    "n_syn",
+    "n_synack",
+    "n_rst",
+    "n_fin",
+    "n_ackonly",
+    "n_psh",
+    "rst_per_syn",
+    "syn_without_synack",
+    "u_syn_dport",
+    "u_syn_sport",
+    "u_syn_pairs",
+    "u_tuples",
+    "u_udp_dport",
+    "iat_mean",
+    "iat_std",
+    "iat_min"
+  ],
+  "window": "w1",
+  "source": "IoT-IDS Lab Dataset v1.0.1 (Zenodo 24511639, CC-BY/MIT)",
+  "n_train": 9090,
+  "n_test": 1452,
+  "heldout_accuracy": 0.9952,
+  "heldout_macro_f1": 0.9811,
+  "confusion_matrix": [
+    [
+      1235,
+      0,
+      0,
+      0
+    ],
+    [
+      2,
+      86,
+      2,
+      0
+    ],
+    [
+      0,
+      2,
+      101,
+      0
+    ],
+    [
+      1,
+      0,
+      0,
+      23
+    ]
+  ],
+  "per_class": {
+    "BENIGN": {
+      "precision": 0.9975767366720517,
+      "recall": 1.0,
+      "f1-score": 0.9987868985038415,
+      "support": 1235.0
+    },
+    "PORT_SCAN": {
+      "precision": 0.9772727272727273,
+      "recall": 0.9555555555555556,
+      "f1-score": 0.9662921348314607,
+      "support": 90.0
+    },
+    "TCP_BURST": {
+      "precision": 0.9805825242718447,
+      "recall": 0.9805825242718447,
+      "f1-score": 0.9805825242718447,
+      "support": 103.0
+    },
+    "UDP_BURST": {
+      "precision": 1.0,
+      "recall": 0.9583333333333334,
+      "f1-score": 0.9787234042553191,
+      "support": 24.0
+    },
+    "accuracy": 0.9951790633608816,
+    "macro avg": {
+      "precision": 0.9888579970541559,
+      "recall": 0.9736178532901835,
+      "f1-score": 0.9810962404656165,
+      "support": 1452.0
+    },
+    "weighted avg": {
+      "precision": 0.9951527653199238,
+      "recall": 0.9951790633608816,
+      "f1-score": 0.9951497751303052,
+      "support": 1452.0
+    }
+  }
+}

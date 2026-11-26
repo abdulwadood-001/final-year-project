@@ -33,6 +33,7 @@ from common.db import Session
 from common.state import STATE, start_heartbeat
 from common.creds import is_weak
 from common import capture
+from http_honeypot import exploits
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | http | %(message)s")
 log = logging.getLogger("http")
@@ -64,6 +65,7 @@ class HttpSessions:
             if entry:
                 entry[0].close("idle")
             s = Session("HTTP", device, ip, sport, port, client_version=ua[:200])
+            s.start_pcap()
             self._s[key] = (s, time.time())
             return s
 
@@ -118,11 +120,26 @@ def add_logging(app, device, server_header, port):
             request.state.basic_ok = ok
         else:
             request.state.basic_ok = False
-        try:
-            response = await call_next(request)
-        except Exception as e:
-            log.debug("handler error %s", e)
-            response = Response("Internal Server Error", status_code=500)
+        handler = exploits.match(request.url.path, request.method)
+        if handler is not None:
+            try:
+                result = await asyncio.to_thread(
+                    handler, device, s, request, request.url.path, request.url.query, body)
+            except Exception as e:
+                log.debug("exploit handler error %s", e)
+                result = None
+            if result is not None:
+                request.state.captured = True
+                status, media, payload = result
+                response = Response(payload, status_code=status, media_type=media)
+            else:
+                response = await call_next(request)
+        else:
+            try:
+                response = await call_next(request)
+            except Exception as e:
+                log.debug("handler error %s", e)
+                response = Response("Internal Server Error", status_code=500)
         response.headers["Server"] = server_header
         hdrs = {k: v for k, v in request.headers.items()
                 if k.lower() not in ("authorization", "cookie")}
@@ -137,6 +154,19 @@ def add_logging(app, device, server_header, port):
                 status=response.status_code, user_agent=ua, headers=hdrs,
                 body_sha256=hashlib.sha256(body).hexdigest() if body else None,
                 body_size=len(body), port=port)
+        if s.pcap is not None:                       # synthesise the HTTP exchange for the PCAP (M3)
+            try:
+                tgt = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+                req_raw = (f"{request.method} {tgt} HTTP/1.1\r\n"
+                           + "".join(f"{k}: {v}\r\n" for k, v in request.headers.items())
+                           + "\r\n").encode("utf-8", "replace") + body
+                s.pcap_in(req_raw)
+                resp_raw = (f"HTTP/1.1 {response.status_code}\r\n"
+                            + "".join(f"{k}: {v}\r\n" for k, v in response.headers.items())
+                            + "\r\n").encode("utf-8", "replace") + getattr(response, "body", b"")
+                s.pcap_out(resp_raw)
+            except Exception:
+                pass
         return response
 
 
@@ -304,10 +334,39 @@ lock = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 add_logging(lock, "smartlock", LOCK_SERVER, LOCK_PORT)
 
 
+# IPs that obtained a token the legitimate way (POST /api/v1/auth with valid creds).
+# A VALID token presented by any other IP is a stolen/guessed token (replay); an
+# INVALID token is a guess. Both are logged for the token-abuse detection rules.
+_lock_authed_ips = set()
+_lock_auth_lock = threading.Lock()
+
+
+def _mark_authed(ip):
+    with _lock_auth_lock:
+        _lock_authed_ips.add(ip)
+        if len(_lock_authed_ips) > 10000:
+            _lock_authed_ips.clear()
+
+
 def _lock_token_ok(request):
     tok = request.headers.get("authorization", "")
     tok = tok[7:] if tok.lower().startswith("bearer ") else request.query_params.get("token", "")
-    return tok and tok == STATE.field("smartlock", "api_token")
+    if not tok:
+        return False
+    valid = tok == STATE.field("smartlock", "api_token")
+    ip = _ip(request)
+    s = getattr(request.state, "hs", None)
+    with _lock_auth_lock:
+        authed = ip in _lock_authed_ips
+    if s is not None:
+        if valid and not authed:
+            # a correct token from an IP that never logged in → stolen / predictable token
+            s.event("token_replay", payload=f"valid API token used without prior auth ({tok[:8]}…)",
+                    token_prefix=tok[:8], path=request.url.path)
+        elif not valid:
+            s.event("token_guess", payload=f"invalid API token {tok[:12]}… on {request.url.path}",
+                    token_prefix=tok[:12], path=request.url.path)
+    return valid
 
 
 @lock.get("/")
@@ -333,6 +392,7 @@ async def lock_auth(request: Request):
     if not ok:
         await asyncio.sleep(0.8)
         return JSONResponse({"error": "invalid_credentials"}, status_code=401)
+    _mark_authed(_ip(request))
     exp = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(timespec="seconds")
     return {"token": STATE.field("smartlock", "api_token"), "expires": exp}
 
@@ -466,15 +526,23 @@ async def main():
     start_heartbeat("http", port=CCTV_PORT, device="cctv,smartlock,sensor", protocol="HTTP")
     common = dict(host="0.0.0.0", log_level="warning", server_header=False, date_header=True,
                   proxy_headers=False)
-    servers = [uvicorn.Server(uvicorn.Config(cctv, port=CCTV_PORT, **common)),
-               uvicorn.Server(uvicorn.Config(lock, port=LOCK_PORT, **common)),
-               uvicorn.Server(uvicorn.Config(sensor, port=SENSOR_PORT, **common))]
-    try:
-        key_p, crt_p = ensure_cert()
-        servers.append(uvicorn.Server(uvicorn.Config(cctv, port=CCTV_TLS_PORT, ssl_keyfile=key_p,
-                                                     ssl_certfile=crt_p, **common)))
-    except Exception as e:
-        log.warning("HTTPS disabled: %s", e)
+    # HTTP_DEVICES limits which device web services this process serves, so one
+    # device "machine" container runs only its own HTTP front-end (default: all).
+    want = {d.strip() for d in os.environ.get("HTTP_DEVICES", "cctv,smartlock,sensor").split(",") if d.strip()}
+    by_device = {"cctv": [(cctv, CCTV_PORT)], "smartlock": [(lock, LOCK_PORT)],
+                 "sensor": [(sensor, SENSOR_PORT)]}
+    servers = [uvicorn.Server(uvicorn.Config(app, port=port, **common))
+               for dev in want for app, port in by_device.get(dev, [])]
+    if "cctv" in want:
+        try:
+            key_p, crt_p = ensure_cert()
+            servers.append(uvicorn.Server(uvicorn.Config(cctv, port=CCTV_TLS_PORT, ssl_keyfile=key_p,
+                                                         ssl_certfile=crt_p, **common)))
+        except Exception as e:
+            log.warning("HTTPS disabled: %s", e)
+    if not servers:
+        log.error("HTTP_DEVICES=%s selected no services", want)
+        return
     for s in servers:
         s.install_signal_handlers = lambda: None
     log.info("HTTP honeypots: CCTV :%d (TLS :%d)  SmartLock :%d  Sensor :%d",
