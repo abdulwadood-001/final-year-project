@@ -56,6 +56,7 @@ volumes:
   nginx_auth:    # bcrypt dashboard credentials written by auth-init
   prometheus_data:
   grafana_data:
+  pcap:          # per-session packet captures (M3 forensic replay)
   ml_models:     # Module 8 trained model artifacts (persist across restarts)
   vm_ipc:        # per-session device-control FIFOs shared with the sandbox machines
     name: honeybot_vm_ipc
@@ -71,6 +72,7 @@ x-machine: &machine
     CAPTURE_DIR: /app/captures
     SANDBOX_HOST: sandbox
     SANDBOX_IPC_DIR: /run/vm-ipc
+    PCAP_DIR: /app/pcap
   networks: [honeynet, backnet]
   depends_on:
     db: { condition: service_healthy }
@@ -81,7 +83,7 @@ x-machine: &machine
   cap_drop: ["ALL"]
   read_only: true
   tmpfs: ["/tmp"]
-  volumes: ["honey_data:/app/data", "captures:/app/captures", "vm_ipc:/run/vm-ipc"]
+  volumes: ["honey_data:/app/data", "captures:/app/captures", "pcap:/app/pcap", "vm_ipc:/run/vm-ipc"]
   deploy:
     resources:
       limits: { cpus: "1.0", memory: 384M }
@@ -94,7 +96,8 @@ x-backend: &backend
   environment:
     CAPTURE_DIR: /app/captures
     ML_API_URL: http://ml_api:5001            # Module 8 inference microservice
-  volumes: ["./geoip:/app/geoip:ro", "captures:/app/captures:ro"]
+    PCAP_DIR: /app/pcap
+  volumes: ["./geoip:/app/geoip:ro", "captures:/app/captures:ro", "pcap:/app/pcap:ro"]
   security_opt: ["no-new-privileges:true"]
   cap_drop: ["ALL"]
   depends_on:

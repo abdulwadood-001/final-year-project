@@ -332,6 +332,9 @@ def handle(sock, addr):
         if too_many:
             session.event("rate_limited")
             return
+        from common.pcap import RecordingSocket
+        if session.start_pcap():                     # capture the real on-wire bytes (M3)
+            sock = RecordingSocket(sock, session.pcap)
         transport = paramiko.Transport(sock)
         transport.local_version = SERVER_VERSION
         transport.add_server_key(HOST_KEY)

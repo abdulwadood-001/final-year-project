@@ -272,6 +272,9 @@ def handle(sock, addr):
         if too_many:
             session.event("rate_limited")
             return
+        from common.pcap import RecordingSocket
+        if session.start_pcap():
+            sock = RecordingSocket(sock, session.pcap)
         ModbusConn(sock, session).run()
     finally:
         session.close()

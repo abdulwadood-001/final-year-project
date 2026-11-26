@@ -95,6 +95,7 @@ class RTSPConn:
         peer = writer.get_extra_info("peername") or ("unknown", 0)
         self.ip, self.sport = peer[0], peer[1]
         self.s = Session("RTSP", DEVICE, self.ip, self.sport, PORT)
+        self.s.start_pcap()
         self.nonce = secrets.token_hex(16)
         self.authed = False
         self.rtsp_session = None
@@ -103,6 +104,7 @@ class RTSPConn:
 
     async def read_request(self):
         head = await asyncio.wait_for(self.r.readuntil(b"\r\n\r\n"), timeout=60)
+        self.s.pcap_in(head)
         if len(head) > 16384:
             raise ValueError("header too large")
         text = head.decode("utf-8", "replace")
@@ -120,6 +122,7 @@ class RTSPConn:
         cl = int(headers.get("content-length", "0") or 0)
         if 0 < cl < 65536:
             body = await self.r.readexactly(cl)
+            self.s.pcap_in(body)
         return method.upper(), url, headers, body
 
     def reply(self, code, reason, cseq, extra=None, body=""):
@@ -130,7 +133,9 @@ class RTSPConn:
             hdr.append(f"{k}: {v}")
         if body:
             hdr.append(f"Content-Length: {len(body.encode())}")
-        self.w.write(("\r\n".join(hdr) + "\r\n\r\n" + body).encode())
+        raw = ("\r\n".join(hdr) + "\r\n\r\n" + body).encode()
+        self.s.pcap_out(raw)
+        self.w.write(raw)
 
     def unauthorized(self, cseq):
         # many cameras advertise both – naive brute-forcers then send cleartext Basic

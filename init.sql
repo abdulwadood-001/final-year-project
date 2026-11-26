@@ -186,6 +186,20 @@ CREATE TABLE IF NOT EXISTS intel_state (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ── M3: per-session packet captures (libpcap, for forensic replay) ──────────
+CREATE TABLE IF NOT EXISTS pcap_files (
+    session_id   UUID PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+    ip           TEXT,
+    device       TEXT,
+    protocol     TEXT,
+    storage_path TEXT,
+    packets      INTEGER,
+    bytes        INTEGER,
+    truncated    BOOLEAN DEFAULT FALSE,
+    captured_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pcap_ip ON pcap_files(ip);
+
 -- ── Module 8 (AI): per-session classifier / anomaly / risk results ──────────
 CREATE TABLE IF NOT EXISTS ml_predictions (
     session_id    UUID PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,

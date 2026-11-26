@@ -444,6 +444,37 @@ def capture_detail(sha256: str):
     return {"sha256": sha256.lower(), "sightings": rows}
 
 
+# ── M3: per-session packet captures (forensic replay) ───────────────────────
+@app.get("/api/pcaps")
+def pcaps(limit: int = Query(100, le=1000), ip: str = Query(None)):
+    """List recorded per-session PCAPs (metadata only)."""
+    where, params = [], []
+    if ip:
+        where.append("ip = %s")
+        params.append(ip)
+    params.append(limit)
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    return _iso(fetchdicts(f"""
+        SELECT session_id, ip, device, protocol, packets, bytes, truncated, captured_at
+        FROM pcap_files {clause} ORDER BY captured_at DESC LIMIT %s""", tuple(params)))
+
+
+@app.get("/api/pcaps/{session_id}")
+def pcap_download(session_id: str):
+    """Download the session's .pcap for Wireshark/tshark analysis."""
+    import os
+    rows = fetchdicts("SELECT storage_path FROM pcap_files WHERE session_id = %s", (session_id,))
+    if not rows or not rows[0].get("storage_path"):
+        raise HTTPException(404, "pcap not found")
+    path = rows[0]["storage_path"]
+    if not os.path.isfile(path):
+        raise HTTPException(404, "pcap file missing on disk")
+    with open(path, "rb") as f:
+        data = f.read()
+    return Response(data, media_type="application/vnd.tcpdump.pcap",
+                    headers={"Content-Disposition": f'attachment; filename="{session_id}.pcap"'})
+
+
 # ── search / export / reports ───────────────────────────────────────────────
 @app.get("/api/search")
 def search(q: str = Query(..., min_length=2), limit: int = Query(100, le=1000)):

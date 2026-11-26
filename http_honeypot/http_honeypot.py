@@ -65,6 +65,7 @@ class HttpSessions:
             if entry:
                 entry[0].close("idle")
             s = Session("HTTP", device, ip, sport, port, client_version=ua[:200])
+            s.start_pcap()
             self._s[key] = (s, time.time())
             return s
 
@@ -153,6 +154,19 @@ def add_logging(app, device, server_header, port):
                 status=response.status_code, user_agent=ua, headers=hdrs,
                 body_sha256=hashlib.sha256(body).hexdigest() if body else None,
                 body_size=len(body), port=port)
+        if s.pcap is not None:                       # synthesise the HTTP exchange for the PCAP (M3)
+            try:
+                tgt = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+                req_raw = (f"{request.method} {tgt} HTTP/1.1\r\n"
+                           + "".join(f"{k}: {v}\r\n" for k, v in request.headers.items())
+                           + "\r\n").encode("utf-8", "replace") + body
+                s.pcap_in(req_raw)
+                resp_raw = (f"HTTP/1.1 {response.status_code}\r\n"
+                            + "".join(f"{k}: {v}\r\n" for k, v in response.headers.items())
+                            + "\r\n").encode("utf-8", "replace") + getattr(response, "body", b"")
+                s.pcap_out(resp_raw)
+            except Exception:
+                pass
         return response
 
 

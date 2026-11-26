@@ -35,20 +35,28 @@ BANNER = "\r\nISN-4000 Industrial Sensor Node  (fw 1.0.7)\r\n\r\n"
 
 
 class TelnetIO:
-    def __init__(self, reader, writer):
+    def __init__(self, reader, writer, session=None):
         self.r, self.w = reader, writer
         self.buf = bytearray()
         self.carry = bytearray()
         self.negotiation = []
+        self.session = session          # for per-session PCAP recording (M3)
+
+    def _write(self, data):
+        self.w.write(data)
+        if self.session is not None:
+            self.session.pcap_out(data)
 
     async def negotiate(self):
-        self.w.write(bytes([IAC, WILL, ECHO, IAC, WILL, SGA, IAC, DO, SGA]))
+        self._write(bytes([IAC, WILL, ECHO, IAC, WILL, SGA, IAC, DO, SGA]))
         await self.w.drain()
 
     async def _fill(self):
         data = await asyncio.wait_for(self.r.read(1024), timeout=IDLE_TIMEOUT)
         if not data:
             raise ConnectionError("eof")
+        if self.session is not None:
+            self.session.pcap_in(data)
         # an IAC command can be split across two TCP reads – keep the tail for next time
         data = bytes(self.carry) + data
         self.carry = bytearray()
@@ -88,7 +96,7 @@ class TelnetIO:
             if b in (10, 13):
                 if b == 13 and self.buf[:1] in (b"\n", b"\x00"):
                     self.buf.pop(0)
-                self.w.write(b"\r\n"); await self.w.drain()
+                self._write(b"\r\n"); await self.w.drain()
                 return line.decode("utf-8", "replace")
             if b == 0:
                 continue
@@ -96,18 +104,18 @@ class TelnetIO:
                 if line:
                     line.pop()
                     if echo:
-                        self.w.write(b"\x08 \x08")
+                        self._write(b"\x08 \x08")
                 continue
             if b == 3:      # Ctrl-C
                 return ""
             line.append(b)
             if echo:
-                self.w.write(bytes([b]))
+                self._write(bytes([b]))
             if len(line) > 8192:
                 return line.decode("utf-8", "replace")
 
     async def send(self, text):
-        self.w.write(text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8", "replace"))
+        self._write(text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8", "replace"))
         await self.w.drain()
 
 
@@ -164,6 +172,7 @@ async def _telnet_real_shell(io, session, user):
                 data = await asyncio.wait_for(io.r.read(4096), timeout=rs_timeout)
                 if not data:
                     break
+                session.pcap_in(data)
                 payload = _strip_iac(data, carry)
                 if payload:
                     if rs.recorder is not None:
@@ -183,6 +192,7 @@ async def _telnet_real_shell(io, session, user):
                 data = await loop.run_in_executor(None, sock.recv, 65536)
                 if not data:
                     break
+                session.pcap_out(data)
                 io.w.write(data)
                 await io.w.drain()
         except (ConnectionError, OSError):
@@ -201,7 +211,8 @@ async def handle(reader, writer):
     peer = writer.get_extra_info("peername") or ("unknown", 0)
     ip, sport = peer[0], peer[1]
     session = Session("Telnet", DEVICE, ip, sport, PORT)
-    io = TelnetIO(reader, writer)
+    session.start_pcap()
+    io = TelnetIO(reader, writer, session=session)
     shell = None
     try:
         await io.negotiate()
