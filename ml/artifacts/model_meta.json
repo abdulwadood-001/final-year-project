@@ -1,0 +1,50 @@
+{
+  "version": "xgb-trained",
+  "classes": [
+    "brute_force",
+    "malware_delivery",
+    "botnet_c2",
+    "port_scan",
+    "protocol_exploit",
+    "normal"
+  ],
+  "features": [
+    "duration_s",
+    "events_total",
+    "auth_attempts",
+    "auth_success",
+    "distinct_usernames",
+    "distinct_passwords",
+    "commands",
+    "download_attempts",
+    "exec_attempts",
+    "file_events",
+    "http_requests",
+    "http_404",
+    "mqtt_publishes",
+    "mqtt_control",
+    "mqtt_wildcard_subs",
+    "rtsp_requests",
+    "rtsp_route_probes",
+    "malformed",
+    "state_changes",
+    "cmd_download",
+    "cmd_chmod",
+    "cmd_busybox",
+    "cmd_tmp_paths",
+    "cmd_discovery",
+    "mean_cmd_len",
+    "mean_gap_s",
+    "std_gap_s",
+    "ip_protocols_1h",
+    "ip_sessions_1h"
+  ],
+  "n_samples": 3600,
+  "heldout_accuracy": 0.9958,
+  "heldout_macro_f1": 0.9958,
+  "iforest_range": [
+    -0.0453,
+    0.126
+  ],
+  "data_source": "synthetic-balanced-3600"
+}
