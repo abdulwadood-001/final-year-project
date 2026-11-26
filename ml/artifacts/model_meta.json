@@ -1,5 +1,5 @@
 {
-  "version": "xgb-trained",
+  "version": "xgb-real+synth",
   "classes": [
     "brute_force",
     "malware_delivery",
@@ -39,12 +39,57 @@
     "ip_protocols_1h",
     "ip_sessions_1h"
   ],
-  "n_samples": 3600,
-  "heldout_accuracy": 0.9958,
-  "heldout_macro_f1": 0.9958,
+  "n_samples": 7000,
+  "heldout_accuracy": 0.9979,
+  "heldout_macro_f1": 0.9978,
   "iforest_range": [
-    -0.0453,
-    0.126
+    -0.0694,
+    0.1444
   ],
-  "data_source": "synthetic-balanced-3600"
+  "data_source": "real Cowrie (CyberLab honeynet) + synthetic for IoT-only classes",
+  "real_data_eval": {
+    "accuracy": 0.9987,
+    "macro_f1": 0.9987,
+    "classes": [
+      "brute_force",
+      "malware_delivery",
+      "port_scan",
+      "normal"
+    ],
+    "confusion_matrix": [
+      [
+        190,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        190,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        189,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        190
+      ]
+    ],
+    "n_test": 760
+  },
+  "training_counts": {
+    "normal": 1200,
+    "port_scan": 1200,
+    "malware_delivery": 1200,
+    "brute_force": 1200,
+    "botnet_c2": 1100,
+    "protocol_exploit": 1100
+  }
 }
