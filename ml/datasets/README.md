@@ -1,7 +1,7 @@
 # Module 8 datasets
 
-- `honeybot_cowrie_dataset.csv.gz` — **real internet attacker data**: 58,957 SSH/Telnet
-  sessions from the public CyberLab honeynet (~50 Cowrie nodes, Zenodo 3687527, CC-BY),
+- `honeybot_cowrie_dataset.csv.gz` — **real internet attacker data**: 262,590 SSH/Telnet
+  sessions from the public CyberLab honeynet (~50 Cowrie nodes, 7 days May2019-Jan2020, Zenodo 3687527, CC-BY),
   parsed into the 29-feature schema with behaviour-based weak labels. `gunzip` to use.
 - `honeybot_training_dataset.csv` — balanced synthetic set (3600 sessions, 6 classes);
   supplies the two IoT-only classes (botnet_c2, protocol_exploit) Cowrie lacks.

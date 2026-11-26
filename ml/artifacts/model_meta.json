@@ -1,5 +1,5 @@
 {
-  "version": "xgb-real+synth",
+  "version": "xgb-real-multiday",
   "classes": [
     "brute_force",
     "malware_delivery",
@@ -39,57 +39,66 @@
     "ip_protocols_1h",
     "ip_sessions_1h"
   ],
-  "n_samples": 7000,
-  "heldout_accuracy": 0.9979,
-  "heldout_macro_f1": 0.9978,
+  "n_samples": 8600,
+  "heldout_accuracy": 1.0,
+  "heldout_macro_f1": 1.0,
   "iforest_range": [
-    -0.0694,
-    0.1444
+    -0.0766,
+    0.1352
   ],
-  "data_source": "real Cowrie (CyberLab honeynet) + synthetic for IoT-only classes",
-  "real_data_eval": {
-    "accuracy": 0.9987,
-    "macro_f1": 0.9987,
+  "data_source": "real CyberLab Cowrie honeynet (7 days, May2019-Jan2020, ~250k sessions) + synthetic for IoT-only classes",
+  "temporal_eval": {
+    "accuracy": 0.999,
+    "macro_f1": 0.999,
+    "n_test": 2000,
+    "confusion_matrix": [
+      [
+        499,
+        0,
+        0,
+        1
+      ],
+      [
+        0,
+        500,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        500,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        499
+      ]
+    ],
     "classes": [
       "brute_force",
       "malware_delivery",
       "port_scan",
       "normal"
-    ],
-    "confusion_matrix": [
-      [
-        190,
-        0,
-        0,
-        0
-      ],
-      [
-        0,
-        190,
-        0,
-        0
-      ],
-      [
-        0,
-        0,
-        189,
-        1
-      ],
-      [
-        0,
-        0,
-        0,
-        190
-      ]
-    ],
-    "n_test": 760
+    ]
   },
+  "real_days_trained": [
+    "2019-05-13",
+    "2019-06-30",
+    "2019-08-17",
+    "2019-10-04",
+    "2020-01-08",
+    "2019-11-01"
+  ],
+  "test_day": "2019-11-21",
   "training_counts": {
-    "normal": 1200,
-    "port_scan": 1200,
-    "malware_delivery": 1200,
-    "brute_force": 1200,
-    "botnet_c2": 1100,
-    "protocol_exploit": 1100
+    "normal": 1500,
+    "port_scan": 1500,
+    "brute_force": 1500,
+    "malware_delivery": 1500,
+    "protocol_exploit": 1300,
+    "botnet_c2": 1300
   }
 }
